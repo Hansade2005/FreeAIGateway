@@ -12,6 +12,39 @@ import { contentToString, messageHasImage, normalizeOutboundContent } from '../l
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { getCacheConfig, buildCacheKey, getCached, setCached, type CachedCompletion } from '../services/cache.js';
+import { getBuiltinToolsConfig, getEnabledBuiltinToolDefs, isBuiltinTool, executeBuiltinTool } from '../services/builtin-tools.js';
+import type { BaseProvider, CompletionOptions } from '../providers/base.js';
+import type { ChatCompletionResponse, ChatToolDefinition } from '@freellmapi/shared/types.js';
+
+// Agent loop for gateway-executed built-in tools (web_search/web_extract/
+// generate_image). When the model answers with ONLY built-in tool calls, run
+// them server-side, feed the results back, and re-ask — up to a small cap — so
+// the client gets a finished answer. If the model calls a CLIENT tool (or mixes
+// in one), we stop and hand the turn back so the client's own tool loop runs.
+const MAX_BUILTIN_TOOL_ITERS = 5;
+async function resolveBuiltinToolCalls(
+  provider: BaseProvider,
+  apiKey: string,
+  modelId: string,
+  first: ChatCompletionResponse,
+  messages: ChatMessage[],
+  opts: CompletionOptions,
+): Promise<ChatCompletionResponse> {
+  let current = first;
+  const convo: ChatMessage[] = [...messages];
+  for (let i = 0; i < MAX_BUILTIN_TOOL_ITERS; i++) {
+    const calls = current.choices?.[0]?.message?.tool_calls ?? [];
+    if (calls.length === 0) break;
+    if (!calls.every((c) => isBuiltinTool(c.function.name))) break; // client tool present
+    convo.push(current.choices[0].message);
+    for (const c of calls) {
+      const output = await executeBuiltinTool(c.function.name, c.function.arguments);
+      convo.push({ role: 'tool', tool_call_id: c.id, content: output });
+    }
+    current = await provider.chatCompletion(apiKey, convo, modelId, opts);
+  }
+  return current;
+}
 
 export const proxyRouter = Router();
 
@@ -419,6 +452,23 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const tool_choice = parsed.data.tool_choice === 'any' ? 'required' as const : parsed.data.tool_choice;
   const tools = parsed.data.tools?.map(t => ({ ...t, type: 'function' as const }));
 
+  // Built-in (gateway-executed) tools. Injected only on the non-streaming path,
+  // only when a tool-capable model is enabled (so plain chat isn't forced onto
+  // a narrower pool when none exists), and only if the caller didn't opt out
+  // (`x-builtin-tools: off`). Merged with any client tools; the agent loop in
+  // the non-stream branch resolves them. Default-on, toggleable in Settings.
+  const builtinCfg = getBuiltinToolsConfig();
+  const builtinOptOut = String(req.headers['x-builtin-tools'] ?? '').toLowerCase() === 'off';
+  // Built-ins augment only the gateway's signature AUTO-routed path: no explicit
+  // model pin (honor an exact model choice verbatim), no client tools (an agent
+  // client keeps full control of its own toolset), non-streaming, not opted out,
+  // and only when a tool-capable model actually exists to run them.
+  const clientSentTools = (tools?.length ?? 0) > 0;
+  const autoRouted = !requestedModel || isAutoModel(requestedModel);
+  const useBuiltinTools = !stream && builtinCfg.enabled && !builtinOptOut && !clientSentTools && autoRouted && hasEnabledToolsModel();
+  const builtinToolDefs: ChatToolDefinition[] = useBuiltinTools ? getEnabledBuiltinToolDefs(builtinCfg) : [];
+  const effectiveTools = builtinToolDefs.length ? [...(tools ?? []), ...builtinToolDefs] : tools;
+
   // Pairing state for id-less tool calls (#200): every tool_call id (given or
   // synthesized) queues up here; a tool message without a tool_call_id takes
   // the oldest unanswered one, which matches the single-call-per-turn flow
@@ -514,7 +564,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // health. Streaming hits replay the cached completion as a single SSE frame.
   const cacheCfg = getCacheConfig();
   const cacheKey = cacheCfg.enabled && !cacheOptedOut(req)
-    ? buildCacheKey({ endpoint: 'chat', model: requestedModel, messages, tools, tool_choice, temperature, top_p, max_tokens })
+    ? buildCacheKey({ endpoint: 'chat', model: requestedModel, messages, tools: effectiveTools, tool_choice, temperature, top_p, max_tokens })
     : null;
   if (cacheKey) {
     const hit = getCached(cacheKey);
@@ -567,7 +617,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // call into its text answer — the request "succeeds" but the client's tool
   // loop sees nothing, which is strictly worse than an error. Same up-front
   // gate pattern as vision above.
-  const wantsTools = (tools?.length ?? 0) > 0;
+  const wantsTools = (effectiveTools?.length ?? 0) > 0;
   if (wantsTools && !hasEnabledToolsModel()) {
     res.status(422).json({
       error: {
@@ -652,7 +702,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         try {
           const gen = route.provider.streamChatCompletion(
             route.apiKey, messages, route.modelId,
-            { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
+            { temperature, max_tokens, top_p, tools: effectiveTools, tool_choice, parallel_tool_calls },
           );
 
           for await (const chunk of gen) {
@@ -728,10 +778,14 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           throw streamErr;
         }
       } else {
-        const result = await route.provider.chatCompletion(
-          route.apiKey, messages, route.modelId,
-          { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
-        );
+        const completionOpts = { temperature, max_tokens, top_p, tools: effectiveTools, tool_choice, parallel_tool_calls };
+        let result = await route.provider.chatCompletion(route.apiKey, messages, route.modelId, completionOpts);
+
+        // Built-in tool agent loop: resolve any gateway-executed tool calls
+        // server-side before returning, so the client gets a finished answer.
+        if (builtinToolDefs.length) {
+          result = await resolveBuiltinToolCalls(route.provider, route.apiKey, route.modelId, result, messages, completionOpts);
+        }
 
         // Empty completion (no text, no tool calls) → fail over rather than
         // return a transport-level "success" the caller can't act on. Mirrors

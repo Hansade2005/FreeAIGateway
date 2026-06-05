@@ -1,3 +1,7 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import crypto from 'crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
@@ -9,24 +13,24 @@ export const imagesRouter = Router();
 // ─────────────────────────────────────────────────────────────────────────
 // OpenAI-compatible image generation (POST /v1/images/generations).
 //
-// Backed by a0.dev's keyless text-to-image asset endpoint:
+// Backed by a0.dev's keyless text-to-image endpoint:
 //   https://api.a0.dev/assets/image?text=<prompt>&aspect=<16:9|9:16|1:1>
 //
-// We accept the OpenAI Images request shape (prompt, n, size, response_format)
-// so any OpenAI client/SDK works unchanged, translate `size` → a0.dev `aspect`,
-// and return the OpenAI `{ created, data: [{ url } | { b64_json }] }` envelope.
-// No provider key required (it rides the gateway's unified key like every other
-// endpoint). See README "Image generation".
+// We FETCH the generated asset, save it as a PNG in the OS temp folder, and
+// return its local file path (plus a gateway-served URL so the image is
+// viewable, and optional b64_json). Accepts the OpenAI Images request shape so
+// any OpenAI client/SDK works unchanged. No provider key required — it rides
+// the gateway's unified key. See README "Image generation".
 // ─────────────────────────────────────────────────────────────────────────
 
 const A0_BASE = 'https://api.a0.dev/assets/image';
 const PLATFORM = 'a0dev';
 const MODEL_ID = 'a0-image';
+const IMAGE_DIR = path.join(os.tmpdir(), 'freeaigateway-images');
+const FILE_NAME_RE = /^img-\d+-[0-9a-f]+\.png$/;
 
 type Aspect = '1:1' | '16:9' | '9:16';
 
-// Map an OpenAI `size` ("1024x1024", "1792x1024", …) to an a0.dev aspect.
-// An explicit `aspect` field (our extension) wins when valid.
 function resolveAspect(size: string | undefined, aspect: string | undefined): Aspect {
   if (aspect === '1:1' || aspect === '16:9' || aspect === '9:16') return aspect;
   const m = /^(\d+)\s*x\s*(\d+)$/i.exec((size ?? '').trim());
@@ -39,21 +43,51 @@ function resolveAspect(size: string | undefined, aspect: string | undefined): As
   return '1:1';
 }
 
-function buildImageUrl(prompt: string, aspect: Aspect, seed?: number): string {
+function a0Url(prompt: string, aspect: Aspect, seed?: number): string {
   const params = new URLSearchParams({ text: prompt, aspect });
   if (seed != null) params.set('seed', String(seed));
   return `${A0_BASE}?${params.toString()}`;
 }
 
+// Fetch the asset and persist it as a PNG in the OS temp dir; returns the
+// absolute file path.
+export async function fetchAndSaveImage(prompt: string, aspect: Aspect, seed?: number): Promise<string> {
+  const res = await fetch(a0Url(prompt, aspect, seed));
+  if (!res.ok) throw new Error(`a0.dev returned ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.mkdirSync(IMAGE_DIR, { recursive: true });
+  const name = `img-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.png`;
+  const file = path.join(IMAGE_DIR, name);
+  fs.writeFileSync(file, buf);
+  return file;
+}
+
 const imagesRequestSchema = z.object({
   prompt: z.string().min(1),
-  // `n` images; a0.dev is one-image-per-URL, so n>1 returns n seeded variants.
   n: z.number().int().min(1).max(10).optional(),
   size: z.string().optional(),
   aspect: z.enum(['1:1', '16:9', '9:16']).optional(),
   response_format: z.enum(['url', 'b64_json']).optional(),
   model: z.string().optional(),
 }).passthrough();
+
+// Serve a generated PNG back out (so the returned URL is actually viewable).
+// Filename is strictly validated to prevent path traversal — only our own
+// generated names ever resolve.
+imagesRouter.get('/images/files/:name', (req: Request, res: Response) => {
+  const name = String(req.params.name);
+  if (!FILE_NAME_RE.test(name)) {
+    res.status(400).json({ error: { message: 'invalid file name', type: 'invalid_request_error' } });
+    return;
+  }
+  const file = path.join(IMAGE_DIR, name);
+  if (!file.startsWith(IMAGE_DIR) || !fs.existsSync(file)) {
+    res.status(404).json({ error: { message: 'image not found', type: 'not_found' } });
+    return;
+  }
+  res.setHeader('Content-Type', 'image/png');
+  fs.createReadStream(file).pipe(res);
+});
 
 imagesRouter.post('/images/generations', async (req: Request, res: Response) => {
   const start = Date.now();
@@ -75,22 +109,20 @@ imagesRouter.post('/images/generations', async (req: Request, res: Response) => 
   const { prompt, response_format } = parsed.data;
   const n = parsed.data.n ?? 1;
   const aspect = resolveAspect(parsed.data.size, parsed.data.aspect);
-  // n>1 gets distinct seeds so callers get variants rather than identical URLs.
-  const urls = Array.from({ length: n }, (_, i) => buildImageUrl(prompt, aspect, n > 1 ? Date.now() + i : undefined));
+  const origin = `${req.protocol}://${req.get('host')}`;
 
   try {
-    let data: Array<{ url: string } | { b64_json: string }>;
-    if (response_format === 'b64_json') {
-      // Fetch each asset and inline it as base64 (OpenAI b64_json parity).
-      data = await Promise.all(urls.map(async (url) => {
-        const r = await fetch(url);
-        if (!r.ok) throw new Error(`a0.dev returned ${r.status}`);
-        const buf = Buffer.from(await r.arrayBuffer());
-        return { b64_json: buf.toString('base64') };
-      }));
-    } else {
-      data = urls.map((url) => ({ url }));
-    }
+    const data = await Promise.all(
+      Array.from({ length: n }, async (_, i) => {
+        const file = await fetchAndSaveImage(prompt, aspect, n > 1 ? Date.now() + i : undefined);
+        const url = `${origin}/v1/images/files/${path.basename(file)}`;
+        if (response_format === 'b64_json') {
+          return { b64_json: fs.readFileSync(file).toString('base64'), path: file, url };
+        }
+        // Default: the saved PNG path (the user's ask) plus a viewable URL.
+        return { url, path: file };
+      }),
+    );
 
     res.setHeader('X-Routed-Via', `${PLATFORM}/${MODEL_ID}`);
     res.json({ created: Math.floor(Date.now() / 1000), data, model: MODEL_ID });
