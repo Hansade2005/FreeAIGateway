@@ -1,18 +1,18 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>FreeAIGateway — One key. 1.7 billion free LLM tokens. Every month.</title>
-<meta name="description" content="A self-hosted, OpenAI-compatible proxy that routes across 16 free-tier LLM providers — Gemini, OpenRouter, Cerebras, Groq, Mistral, GitHub Models, SambaNova, Cohere, Cloudflare, Z.ai, NVIDIA, HuggingFace, Ollama, Kilo, Pollinations, LLM7 — plus any custom OpenAI-compatible endpoint. ~1.7B free tokens / month, 100+ models." />
-<meta name="theme-color" content="#0a0a0a" />
+<title>FreeAIGateway — One gateway. Two protocols. 1.7B free LLM tokens / month.</title>
+<meta name="description" content="A self-hosted gateway that speaks both the OpenAI and Anthropic wire formats, routing across 16 free-tier LLM providers — Gemini, Groq, Cerebras, SambaNova, Mistral, OpenRouter, GitHub Models, Cohere, Cloudflare, Z.ai, NVIDIA, HuggingFace, Ollama, Kilo, Pollinations, LLM7 — plus any custom endpoint. ~1.7B free tokens / month, 100+ models, automatic failover, encrypted keys, built-in agent tools." />
+<meta name="theme-color" content="#0d1014" />
 <link rel="canonical" href="https://hansade2005.github.io/FreeAIGateway/" />
 
 <!-- Open Graph -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="FreeAIGateway" />
-<meta property="og:title" content="FreeAIGateway — 1.7B free LLM tokens / month" />
-<meta property="og:description" content="One self-hosted, OpenAI-compatible proxy across 16 free-tier LLM providers. 100+ models. ~1.7B free tokens per month." />
+<meta property="og:title" content="FreeAIGateway — One gateway. Two protocols. 1.7B free tokens / month." />
+<meta property="og:description" content="One self-hosted proxy speaking OpenAI + Anthropic, across 16 free-tier LLM providers. 100+ models. ~1.7B free tokens per month." />
 <meta property="og:url" content="https://hansade2005.github.io/FreeAIGateway/" />
 <meta property="og:image" content="https://hansade2005.github.io/FreeAIGateway/og.png" />
 <meta property="og:image:width" content="1200" />
@@ -21,435 +21,533 @@
 
 <!-- Twitter -->
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="FreeAIGateway — 1.7B free LLM tokens / month" />
-<meta name="twitter:description" content="One self-hosted, OpenAI-compatible proxy across 16 free-tier LLM providers. 100+ models. ~1.7B free tokens per month." />
+<meta name="twitter:title" content="FreeAIGateway — One gateway. Two protocols." />
+<meta name="twitter:description" content="One self-hosted proxy speaking OpenAI + Anthropic, across 16 free-tier LLM providers. 100+ models. ~1.7B free tokens per month." />
 <meta name="twitter:image" content="https://hansade2005.github.io/FreeAIGateway/og.png" />
-<link rel="icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%230a0a0a'/%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ffffff'/%3E%3Ccircle cx='16' cy='16' r='3.2' fill='%230a0a0a'/%3E%3C/svg%3E" />
+
+<link rel="icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231a1d22'/%3E%3Cg fill='none' stroke='%23fafafa' stroke-width='4' stroke-linecap='round'%3E%3Cpath d='M14 22h12c4.4 0 8 3.6 8 8' opacity='.5'/%3E%3Cpath d='M14 42h12c4.4 0 8-3.6 8-8' opacity='.5'/%3E%3Cpath d='M36 32h16'/%3E%3C/g%3E%3Ccircle cx='32' cy='32' r='8.5' fill='%235ce39a'/%3E%3Ccircle cx='32' cy='32' r='14' fill='none' stroke='%235ce39a' stroke-opacity='.4' stroke-width='3'/%3E%3C/svg%3E" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
 <style>
-  :root {
-    --bg: #fafafa;
-    --fg: #0a0a0a;
-    --muted: #6b6b6b;
-    --border: #e5e5e5;
-    --card: #ffffff;
-    --accent: #0a0a0a;
-    --accent-soft: #f0f0f0;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.05);
-    --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.08), 0 24px 56px rgba(0, 0, 0, 0.10);
-    --radius-sm: 12px;
-    --radius: 20px;
-    --radius-lg: 28px;
+  /* ── Design tokens: ported from the app (carbon-blue surfaces, one electric
+     green "signal" accent). Dark by default; [data-theme=light] flips it. ── */
+  :root, [data-theme="dark"] {
+    --bg: oklch(0.165 0.012 256);
+    --fg: oklch(0.96 0.004 106);
+    --muted: oklch(0.96 0.004 106 / 0.62);
+    --faint: oklch(0.96 0.004 106 / 0.40);
+    --surface-1: oklch(0.195 0.013 256);
+    --surface-2: oklch(0.225 0.014 256);
+    --surface-3: oklch(0.265 0.015 256);
+    --border: oklch(1 0 0 / 0.09);
+    --border-strong: oklch(1 0 0 / 0.16);
+    --signal: oklch(0.86 0.19 152);
+    --signal-fg: oklch(0.2 0.06 160);
+    --signal-muted: oklch(0.86 0.19 152 / 0.14);
+    --glass: oklch(0.18 0.012 256 / 0.72);
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 18px 50px -20px rgba(0,0,0,.6);
+    --code-bg: oklch(0.135 0.01 256);
   }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  [data-theme="light"] {
+    --bg: oklch(0.985 0.004 106);
+    --fg: oklch(0.2 0.012 256);
+    --muted: oklch(0.2 0.012 256 / 0.62);
+    --faint: oklch(0.2 0.012 256 / 0.42);
+    --surface-1: oklch(1 0 0);
+    --surface-2: oklch(0.975 0.004 106);
+    --surface-3: oklch(0.955 0.005 106);
+    --border: oklch(0 0 0 / 0.10);
+    --border-strong: oklch(0 0 0 / 0.18);
+    --signal: oklch(0.58 0.15 152);
+    --signal-fg: oklch(0.99 0.02 152);
+    --signal-muted: oklch(0.58 0.15 152 / 0.12);
+    --glass: oklch(1 0 0 / 0.72);
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 18px 50px -22px rgba(0,0,0,.18);
+    --code-bg: oklch(0.97 0.004 106);
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
   body {
-    margin: 0;
     background: var(--bg);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    font-family: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
   }
-  .mono { font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, 'Cascadia Code', monospace; }
-  .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  /* Gradient-mesh canvas + faint grain, like the app */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(50rem 50rem at 12% -8%, color-mix(in oklab, var(--signal) 13%, transparent), transparent 60%),
+      radial-gradient(46rem 46rem at 92% 0%, color-mix(in oklab, oklch(0.7 0.13 256) 12%, transparent), transparent 60%);
+  }
+  .mono { font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace; }
+  .display { font-family: 'Bricolage Grotesque', 'Geist', sans-serif; }
+  a { color: inherit; }
+  .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+  section { padding: 80px 0; }
+  .eyebrow {
+    font-family: 'Geist Mono', monospace; font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--signal); margin-bottom: 14px;
+  }
+  h2.section-title {
+    font-family: 'Bricolage Grotesque', sans-serif; font-weight: 700;
+    font-size: clamp(28px, 4vw, 42px); line-height: 1.08; letter-spacing: -.02em;
+  }
+  .section-sub { color: var(--muted); font-size: 17px; max-width: 620px; margin-top: 14px; }
+
+  /* ── Nav ── */
   nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 20px 0; gap: 16px;
+    position: sticky; top: 0; z-index: 50;
+    background: var(--glass); backdrop-filter: blur(16px) saturate(140%);
+    border-bottom: 1px solid var(--border);
   }
-  .brand {
-    display: inline-flex; align-items: center; gap: 10px;
-    font-weight: 700; font-size: 17px; color: var(--fg); text-decoration: none;
-  }
-  .brand-mark {
-    width: 32px; height: 32px; border-radius: 9px;
-    background: var(--fg);
-    display: grid; place-items: center;
-    box-shadow: var(--shadow);
-  }
-  .brand-mark svg { width: 18px; height: 18px; display: block; }
-  .nav-links { display: flex; gap: 8px; }
-  .nav-links a {
-    color: var(--muted); text-decoration: none; font-size: 14px;
-    padding: 8px 14px; border-radius: 999px; transition: all 0.15s;
-  }
-  .nav-links a:hover { background: var(--accent-soft); color: var(--fg); }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: inline-flex; align-items: center; gap: 11px; font-weight: 600; font-size: 16px; text-decoration: none; }
+  .brand .mark { width: 30px; height: 30px; border-radius: 9px; display: block; box-shadow: var(--shadow); }
+  .brand .ai { color: var(--signal); }
+  .nav-links { display: flex; align-items: center; gap: 4px; }
+  .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; padding: 8px 13px; border-radius: 9px; transition: .15s; }
+  .nav-links a:hover { background: var(--surface-2); color: var(--fg); }
+  .icon-btn { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; border: 1px solid var(--border); background: var(--surface-1); color: var(--fg); cursor: pointer; transition: .15s; }
+  .icon-btn:hover { border-color: var(--border-strong); }
+  .nav-ghost { display: none; }
+  @media (max-width: 720px) { .nav-links .nav-ghost { display: none; } .nav-links a.hide-sm { display: none; } }
 
-  .hero { padding: 80px 0 48px; text-align: center; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 6px 14px; border-radius: 999px;
-    background: var(--card); color: var(--fg);
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: 12px; font-weight: 500; letter-spacing: 0.05em;
-    border: 1px solid var(--border);
-  }
-  .badge-dot {
-    width: 6px; height: 6px; border-radius: 50%; background: var(--fg);
-    box-shadow: 0 0 0 4px rgba(10, 10, 10, 0.10);
-    animation: pulse 2s ease-in-out infinite;
-  }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 8px transparent; } }
-  h1 {
-    font-size: clamp(36px, 6vw, 64px);
-    line-height: 1.05; letter-spacing: -0.03em;
-    margin: 24px 0 20px; font-weight: 800;
-  }
-  h1 .gradient {
-    color: var(--muted);
-  }
-  .subtitle {
-    font-size: clamp(17px, 2vw, 20px); color: var(--muted);
-    max-width: 640px; margin: 0 auto 40px;
-  }
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 20px; border-radius: 11px; font-size: 15px; font-weight: 600; text-decoration: none; transition: .18s; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
+  .btn svg { width: 16px; height: 16px; }
+  .btn-primary { background: var(--signal); color: var(--signal-fg); box-shadow: 0 6px 20px -6px color-mix(in oklab, var(--signal) 55%, transparent); }
+  .btn-primary:hover { transform: translateY(-1px); filter: brightness(1.05); }
+  .btn-ghost { background: var(--surface-1); color: var(--fg); border-color: var(--border-strong); }
+  .btn-ghost:hover { background: var(--surface-2); }
+
+  /* ── Hero ── */
+  .hero { padding: 72px 0 36px; text-align: center; }
+  .pill { display: inline-flex; align-items: center; gap: 9px; padding: 6px 14px; border-radius: 999px; background: var(--surface-1); border: 1px solid var(--border); font-family: 'Geist Mono', monospace; font-size: 12.5px; color: var(--muted); }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 0 4px var(--signal-muted); animation: pulse 2.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 9px transparent; } }
+  .hero h1 { font-family: 'Bricolage Grotesque', sans-serif; font-weight: 800; font-size: clamp(40px, 7vw, 76px); line-height: 1.02; letter-spacing: -.035em; margin: 22px auto 0; max-width: 16ch; }
+  .hero h1 .grad { background: linear-gradient(100deg, var(--signal), oklch(0.78 0.16 200)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .hero .subtitle { font-size: clamp(17px, 2.1vw, 21px); color: var(--muted); max-width: 660px; margin: 24px auto 34px; }
   .cta-row { display: inline-flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 14px 24px; border-radius: 999px;
-    font-size: 15px; font-weight: 600; text-decoration: none;
-    transition: all 0.2s; border: 1px solid transparent;
-  }
-  .btn-primary {
-    background: var(--fg); color: var(--bg);
-  }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-lg); }
-  .btn-secondary {
-    background: var(--card); color: var(--fg); border-color: var(--border);
-  }
-  .btn-secondary:hover { background: var(--accent-soft); border-color: var(--fg); }
+  .hero-meta { margin-top: 22px; color: var(--faint); font-size: 13.5px; font-family: 'Geist Mono', monospace; }
 
-  /* Tokens stat block — the centerpiece */
-  .tokens-stat {
-    margin: 64px auto; max-width: 760px;
-    background: var(--fg); color: var(--bg);
-    border-radius: var(--radius-lg);
-    padding: 64px 32px; text-align: center;
-    box-shadow: var(--shadow-lg);
-  }
-  .tokens-label {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.25em; opacity: 0.6;
-  }
-  .tokens-number {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: clamp(72px, 14vw, 160px); font-weight: 700;
-    line-height: 1; margin: 22px 0 14px; letter-spacing: -0.05em;
-    font-variant-numeric: tabular-nums;
-    display: block;
-  }
-  .tokens-unit {
-    display: block;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: clamp(13px, 1.4vw, 15px); font-weight: 500;
-    text-transform: uppercase; letter-spacing: 0.4em; opacity: 0.6;
-    margin-top: 4px;
-  }
-  .tokens-sub { margin-top: 28px; opacity: 0.7; font-size: 14px; max-width: 520px; margin-left: auto; margin-right: auto; }
+  .hero-shot { margin: 56px auto 0; max-width: 1000px; border-radius: 18px; border: 1px solid var(--border); box-shadow: 0 40px 90px -40px rgba(0,0,0,.7); display: block; width: 100%; }
 
-  /* Sections */
-  section { padding: 56px 0; }
-  .section-header { text-align: center; margin-bottom: 40px; }
-  .section-eyebrow {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    color: var(--muted); font-size: 12px; font-weight: 500;
-    text-transform: uppercase; letter-spacing: 0.25em;
-  }
-  h2 {
-    font-size: clamp(28px, 4vw, 40px); margin: 8px 0 12px;
-    font-weight: 700; letter-spacing: -0.02em;
-  }
-  .section-sub { color: var(--muted); max-width: 600px; margin: 0 auto; }
+  /* ── Logo marquee ── */
+  .marquee { overflow: hidden; padding: 28px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+  .marquee-track { display: flex; gap: 56px; width: max-content; animation: scroll 32s linear infinite; align-items: center; }
+  .marquee:hover .marquee-track { animation-play-state: paused; }
+  @keyframes scroll { to { transform: translateX(-50%); } }
+  .marquee img { height: 26px; width: auto; opacity: .72; filter: grayscale(1); transition: .2s; }
+  [data-theme="dark"] .marquee img { filter: grayscale(1) brightness(0) invert(1); opacity: .55; }
+  .marquee span.name { color: var(--muted); font-weight: 600; font-size: 17px; white-space: nowrap; }
 
-  /* Provider grid */
-  .provider-grid {
-    display: grid; gap: 16px;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  }
-  .provider-card {
-    background: var(--card);
-    border-radius: var(--radius);
-    padding: 24px;
-    border: 1px solid var(--border);
-    box-shadow: var(--shadow);
-    transition: all 0.2s ease;
-  }
-  .provider-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
-    border-color: var(--fg);
-  }
-  .provider-name {
-    font-weight: 700; font-size: 16px; margin: 0 0 6px;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .provider-icon {
-    width: 36px; height: 36px; border-radius: 10px; flex: none;
-    background: var(--accent-soft); border: 1px solid var(--border);
-    display: grid; place-items: center;
-  }
-  .provider-icon img {
-    width: 60%; height: 60%; display: block;
-    filter: grayscale(100%) contrast(1.1);
-  }
-  /* Logos that ship their own brand background (e.g. Z.ai's dark rounded square) */
-  .provider-icon.bleed { background: none; border: none; padding: 0; }
-  .provider-icon.bleed img { width: 100%; height: 100%; border-radius: 10px; }
-  .provider-tokens {
-    display: inline-flex; align-items: baseline; gap: 4px;
-    margin: 14px 0 8px;
-  }
-  .provider-tokens .num {
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: 26px; font-weight: 700; letter-spacing: -0.03em;
-    color: var(--fg); font-variant-numeric: tabular-nums;
-  }
-  .provider-tokens .unit { font-size: 13px; color: var(--muted); font-weight: 500; }
-  .provider-tokens .label { color: var(--muted); font-size: 12px; margin-left: auto; }
-  .provider-models { color: var(--muted); font-size: 13px; line-height: 1.5; }
-  .provider-models b { color: var(--fg); font-weight: 600; }
+  /* ── Stats row ── */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .stat { background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+  .stat .v { font-family: 'Bricolage Grotesque', sans-serif; font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .stat .v .u { color: var(--signal); }
+  .stat .l { color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
 
-  /* How it works */
-  .steps {
-    display: grid; gap: 16px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  }
-  .step {
-    background: var(--card); border-radius: var(--radius);
-    padding: 28px; border: 1px solid var(--border); box-shadow: var(--shadow);
-  }
-  .step-num {
-    display: inline-grid; place-items: center;
-    width: 36px; height: 36px; border-radius: 12px;
-    background: var(--fg); color: var(--bg);
-    font-weight: 800; margin-bottom: 14px;
-  }
-  .step h3 { margin: 0 0 6px; font-size: 17px; font-weight: 700; }
-  .step p { margin: 0; color: var(--muted); font-size: 14px; }
+  /* ── Code tabs ── */
+  .code-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; box-shadow: var(--shadow); }
+  .code-tabs { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface-2); align-items: center; }
+  .code-tab { font: inherit; font-size: 13px; font-weight: 600; color: var(--muted); background: none; border: 0; padding: 7px 13px; border-radius: 8px; cursor: pointer; transition: .15s; }
+  .code-tab[aria-selected="true"] { background: var(--surface-3); color: var(--fg); }
+  .code-wrap { position: relative; }
+  pre { margin: 0; padding: 22px 22px 24px; overflow-x: auto; font-family: 'Geist Mono', monospace; font-size: 13px; line-height: 1.7; background: var(--code-bg); }
+  pre code { color: var(--fg); }
+  .tok-c { color: var(--faint); }            /* comment */
+  .tok-k { color: oklch(0.78 0.14 30); }      /* keyword/method */
+  .tok-s { color: var(--signal); }            /* string */
+  .tok-p { color: oklch(0.72 0.12 256); }     /* punct/prop */
+  .copy { position: absolute; top: 12px; right: 12px; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 11px; cursor: pointer; transition: .15s; }
+  .copy:hover { color: var(--fg); border-color: var(--border-strong); }
+  .code-panel[hidden] { display: none; }
 
-  /* Code block — terminal aesthetic */
-  .terminal {
-    max-width: 760px; margin: 0 auto;
-    background: var(--fg); color: #d4d4d4;
-    border-radius: var(--radius);
-    overflow: hidden; box-shadow: var(--shadow-lg);
-    border: 1px solid var(--fg);
-  }
-  .terminal-chrome {
-    display: flex; align-items: center; gap: 8px;
-    padding: 14px 18px;
-    background: rgba(255,255,255,0.04);
-    border-bottom: 1px solid rgba(255,255,255,0.08);
-  }
-  .terminal-chrome .dot {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: rgba(255,255,255,0.15);
-  }
-  .terminal-chrome .filename {
-    margin-left: 12px; color: rgba(255,255,255,0.55);
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
-    font-size: 12px; letter-spacing: 0.05em;
-  }
-  .terminal-body {
-    padding: 24px 28px;
-    font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Monaco, monospace;
-    font-size: 13.5px; line-height: 1.85;
-    overflow-x: auto;
-    margin: 0;
-  }
-  .terminal-body .prompt { color: #8fa9ff; user-select: none; margin-right: 10px; }
-  .terminal-body .c { color: rgba(255,255,255,0.4); font-style: italic; }
-  .terminal-body .k { color: #ffffff; font-weight: 600; }
-  .terminal-body .s { color: #c0c0c0; }
-  .terminal-body .blank { display: block; height: 0.4em; }
+  /* ── Feature grid ── */
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .features { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .features { grid-template-columns: 1fr; } }
+  .feature { background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; padding: 24px; transition: .2s; }
+  .feature:hover { border-color: var(--border-strong); transform: translateY(-2px); }
+  .feature .ico { width: 38px; height: 38px; border-radius: 11px; background: var(--signal-muted); color: var(--signal); display: grid; place-items: center; margin-bottom: 14px; }
+  .feature .ico svg { width: 19px; height: 19px; }
+  .feature h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .feature p { color: var(--muted); font-size: 14px; }
+  .feature code { font-family: 'Geist Mono', monospace; font-size: .88em; background: var(--surface-3); padding: 1px 5px; border-radius: 5px; }
 
-  /* Footer */
-  footer {
-    margin-top: 64px; padding: 40px 0;
-    border-top: 1px solid var(--border);
-    color: var(--muted); font-size: 13px;
-    text-align: center;
-  }
-  footer a { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
-  footer a:hover { text-decoration: underline; }
+  /* ── Providers ── */
+  .prov-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 820px) { .prov-grid { grid-template-columns: repeat(2, 1fr); } }
+  .prov { display: flex; align-items: center; gap: 12px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 13px; padding: 14px 16px; text-decoration: none; transition: .18s; }
+  .prov:hover { border-color: var(--signal); background: var(--surface-2); }
+  .prov .pi { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-3); display: grid; place-items: center; flex: none; font-weight: 700; font-size: 13px; }
+  .prov .pi img { width: 18px; height: 18px; object-fit: contain; }
+  [data-theme="dark"] .prov .pi img { filter: brightness(0) invert(1); }
+  .prov .pt { font-size: 14px; font-weight: 600; }
+  .prov .ps { font-size: 11.5px; color: var(--faint); }
+
+  /* ── Screenshot gallery ── */
+  .shots { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .shots { grid-template-columns: 1fr; } }
+  .shot { border: 1px solid var(--border); border-radius: 16px; overflow: hidden; background: var(--surface-1); box-shadow: var(--shadow); }
+  .shot img { display: block; width: 100%; }
+  .shot .cap { padding: 12px 16px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--border); }
+  .shot .cap b { color: var(--fg); font-weight: 600; }
+
+  /* ── Steps ── */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 28px; }
+  @media (max-width: 760px) { .steps { grid-template-columns: 1fr; } }
+  .step { background: var(--surface-1); border: 1px solid var(--border); border-radius: 16px; padding: 22px; }
+  .step .n { width: 28px; height: 28px; border-radius: 8px; background: var(--signal); color: var(--signal-fg); display: grid; place-items: center; font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+  .step h3 { font-size: 15px; margin-bottom: 5px; }
+  .step p { color: var(--muted); font-size: 13.5px; }
+
+  /* ── Flow diagram ── */
+  .flow { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: center; gap: 14px; }
+  @media (max-width: 760px) { .flow { grid-template-columns: 1fr; } .flow .arrow { transform: rotate(90deg); justify-self: center; } }
+  .flow-node { background: var(--surface-1); border: 1px solid var(--border); border-radius: 14px; padding: 18px; text-align: center; }
+  .flow-node .t { font-weight: 600; font-size: 14px; }
+  .flow-node .d { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+  .flow-node.accent { border-color: var(--signal); background: var(--signal-muted); }
+  .arrow { color: var(--faint); }
+
+  /* ── CTA band ── */
+  .cta-band { background: linear-gradient(160deg, var(--surface-2), var(--surface-1)); border: 1px solid var(--border); border-radius: 24px; padding: 56px 32px; text-align: center; box-shadow: var(--shadow); }
+  .cta-band h2 { font-family: 'Bricolage Grotesque', sans-serif; font-size: clamp(28px, 4vw, 40px); font-weight: 700; letter-spacing: -.02em; }
+  .cta-band p { color: var(--muted); margin: 12px auto 26px; max-width: 520px; }
+
+  /* ── Footer ── */
+  footer { border-top: 1px solid var(--border); padding: 40px 0; }
+  .foot-inner { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 13.5px; }
+  .foot-inner a { color: var(--muted); text-decoration: none; }
+  .foot-inner a:hover { color: var(--fg); }
+  .disclaimer { margin-top: 18px; color: var(--faint); font-size: 12px; max-width: 720px; }
+
+  /* Reveal on scroll */
+  .reveal { opacity: 0; transform: translateY(16px); transition: opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; } .marquee-track { animation: none; } }
 </style>
 </head>
 <body>
-  <div class="container">
-    <nav>
-      <a class="brand" href="#">
-        <span class="brand-mark">
-          <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <circle cx="16" cy="16" r="11" fill="#ffffff"/>
-            <circle cx="16" cy="16" r="4" fill="#0a0a0a"/>
-          </svg>
-        </span>
-        <span>FreeAIGateway</span>
-      </a>
-      <div class="nav-links">
-        <a href="#providers">Providers</a>
-        <a href="#start">Quick start</a>
-        <a href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">GitHub</a>
-      </div>
-    </nav>
 
-    <header class="hero">
-      <span class="badge"><span class="badge-dot"></span> 100+ free models · 16 providers · self-hosted</span>
-      <h1>One key.<br><span class="gradient">1.7 billion</span> free tokens.<br>Every month.</h1>
-      <p class="subtitle">A self-hosted, OpenAI-compatible proxy that routes across every credible free-tier LLM provider. Bring your own keys; we just point requests at whichever provider still has budget left.</p>
+<!-- NAV -->
+<nav>
+  <div class="container nav-inner">
+    <a class="brand" href="#top" aria-label="FreeAIGateway home">
+      <svg class="mark" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect width="64" height="64" rx="14" fill="#1a1d22"/>
+        <g fill="none" stroke="#fafafa" stroke-width="4" stroke-linecap="round">
+          <path d="M14 22h12c4.4 0 8 3.6 8 8" opacity=".5"/><path d="M14 42h12c4.4 0 8-3.6 8-8" opacity=".5"/><path d="M36 32h16"/>
+        </g>
+        <circle cx="32" cy="32" r="8.5" fill="#5ce39a"/><circle cx="32" cy="32" r="14" fill="none" stroke="#5ce39a" stroke-opacity=".4" stroke-width="3"/>
+      </svg>
+      <span>Free<span class="ai">AI</span>Gateway</span>
+    </a>
+    <div class="nav-links">
+      <a class="hide-sm" href="#protocols">Protocols</a>
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#providers">Providers</a>
+      <a class="hide-sm" href="#start">Quick start</a>
+      <a class="nav-ghost" href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">GitHub</a>
+      <button class="icon-btn" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">
+        <svg id="theme-icon" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<a id="top"></a>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="container">
+    <span class="pill"><span class="dot"></span> 16 providers · 100+ models · ~1.7B tokens / month</span>
+    <h1>One gateway.<br><span class="grad">Two protocols.</span><br>Zero cost.</h1>
+    <p class="subtitle">A self-hosted proxy that speaks <b>both</b> the OpenAI and Anthropic wire formats, aggregating the free tiers of sixteen LLM providers behind a single API key — with smart routing, automatic failover, encrypted keys, and built-in agent tools.</p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="#start">Get started
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      <a class="btn btn-ghost" href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49l-.01-1.7c-2.78.62-3.37-1.37-3.37-1.37-.46-1.18-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.14-4.55-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.27 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.32 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.94.68 1.9l-.01 2.82c0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z"/></svg>
+        Star on GitHub
+      </a>
+    </div>
+    <p class="hero-meta">$ docker compose up -d  ·  point your OpenAI <span style="color:var(--signal)">or</span> Anthropic client at one URL</p>
+    <img class="hero-shot reveal" src="https://raw.githubusercontent.com/Hansade2005/FreeAIGateway/main/repo-assets/fallback-chain.png" alt="FreeAIGateway dashboard — routing strategy and live fallback chain" loading="lazy" />
+  </div>
+</header>
+
+<!-- MARQUEE -->
+<div class="marquee" aria-hidden="true">
+  <div class="marquee-track" id="marquee"></div>
+</div>
+
+<!-- STATS -->
+<section style="padding-top:64px;padding-bottom:0;">
+  <div class="container stats">
+    <div class="stat reveal"><div class="v">~1.7<span class="u">B</span></div><div class="l">free tokens / month</div></div>
+    <div class="stat reveal"><div class="v">16<span class="u">+</span></div><div class="l">providers + custom</div></div>
+    <div class="stat reveal"><div class="v">100<span class="u">+</span></div><div class="l">models, auto-routed</div></div>
+    <div class="stat reveal"><div class="v">2</div><div class="l">wire protocols</div></div>
+  </div>
+</section>
+
+<!-- PROTOCOLS / CODE -->
+<section id="protocols">
+  <div class="container">
+    <div class="eyebrow reveal">Drop-in compatible</div>
+    <h2 class="section-title reveal">Point any client at one base URL</h2>
+    <p class="section-sub reveal">Same gateway, same unified key. Speak OpenAI, speak Anthropic, or generate an image — it routes to whichever free provider can serve it and fails over when one is rate-limited.</p>
+
+    <div class="code-card reveal" style="margin-top:28px;">
+      <div class="code-tabs" role="tablist">
+        <button class="code-tab" role="tab" aria-selected="true" data-tab="openai">OpenAI · Python</button>
+        <button class="code-tab" role="tab" aria-selected="false" data-tab="anthropic">Anthropic · TypeScript</button>
+        <button class="code-tab" role="tab" aria-selected="false" data-tab="curl">cURL</button>
+        <button class="code-tab" role="tab" aria-selected="false" data-tab="image">Image</button>
+      </div>
+
+      <div class="code-panel" data-panel="openai">
+        <div class="code-wrap"><button class="copy">Copy</button><pre><code><span class="tok-k">from</span> openai <span class="tok-k">import</span> OpenAI
+
+client = OpenAI(
+    base_url=<span class="tok-s">"http://localhost:3001/v1"</span>,
+    api_key=<span class="tok-s">"freellmapi-your-unified-key"</span>,
+)
+
+resp = client.chat.completions.create(
+    model=<span class="tok-s">"auto"</span>,                 <span class="tok-c"># let the router pick the best free model</span>
+    messages=[{<span class="tok-p">"role"</span>: <span class="tok-s">"user"</span>, <span class="tok-p">"content"</span>: <span class="tok-s">"Explain MoE routing in one line."</span>}],
+)
+<span class="tok-k">print</span>(resp.choices[<span class="tok-s">0</span>].message.content)</code></pre></div>
+      </div>
+
+      <div class="code-panel" data-panel="anthropic" hidden>
+        <div class="code-wrap"><button class="copy">Copy</button><pre><code><span class="tok-k">import</span> Anthropic <span class="tok-k">from</span> <span class="tok-s">"@anthropic-ai/sdk"</span>;
+
+<span class="tok-k">const</span> client = <span class="tok-k">new</span> Anthropic({
+  baseURL: <span class="tok-s">"http://localhost:3001"</span>,
+  apiKey: <span class="tok-s">"freellmapi-your-unified-key"</span>,
+});
+
+<span class="tok-k">const</span> msg = <span class="tok-k">await</span> client.messages.create({
+  model: <span class="tok-s">"claude-sonnet-4-5"</span>,   <span class="tok-c">// unknown ids fall through to auto-routing</span>
+  max_tokens: <span class="tok-s">1024</span>,
+  messages: [{ role: <span class="tok-s">"user"</span>, content: <span class="tok-s">"Say hi from a free provider."</span> }],
+});
+console.<span class="tok-k">log</span>(msg.content);</code></pre></div>
+      </div>
+
+      <div class="code-panel" data-panel="curl" hidden>
+        <div class="code-wrap"><button class="copy">Copy</button><pre><code><span class="tok-k">curl</span> http://localhost:3001/v1/chat/completions \
+  -H <span class="tok-s">"Authorization: Bearer freellmapi-your-unified-key"</span> \
+  -H <span class="tok-s">"Content-Type: application/json"</span> \
+  -d <span class="tok-s">'{
+    "model": "auto",
+    "stream": true,
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'</span></code></pre></div>
+      </div>
+
+      <div class="code-panel" data-panel="image" hidden>
+        <div class="code-wrap"><button class="copy">Copy</button><pre><code><span class="tok-c"># OpenAI Images shape — keyless, saved server-side, returns a path + URL</span>
+<span class="tok-k">curl</span> http://localhost:3001/v1/images/generations \
+  -H <span class="tok-s">"Authorization: Bearer freellmapi-your-unified-key"</span> \
+  -H <span class="tok-s">"Content-Type: application/json"</span> \
+  -d <span class="tok-s">'{ "prompt": "a neon koi over a circuit-board reef", "aspect": "16:9" }'</span></code></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features" style="padding-top:24px;">
+  <div class="container">
+    <div class="eyebrow reveal">Everything in one binary</div>
+    <h2 class="section-title reveal">Built to actually run in production</h2>
+    <div class="features" style="margin-top:32px;">
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></div><h3>Two protocols, one router</h3><p>OpenAI (<code>/v1/chat/completions</code>, <code>/v1/responses</code>) and Anthropic (<code>/v1/messages</code>) over the same routing, retry, and cooldown machinery.</p></div>
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v6M12 16v6M2 12h6M16 12h6"/><circle cx="12" cy="12" r="3"/></svg></div><h3>Automatic failover</h3><p>On a 429, 5xx, or timeout the router skips the provider, cools the key down, and retries the next model — up to 20 attempts.</p></div>
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div><h3>Built-in agent tools</h3><p>Gateway-run <code>web_search</code>, <code>web_extract</code>, and <code>generate_image</code> turn plain chat into an agent — generated images render inline.</p></div>
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M13 2L3 14h7l-1 8 10-12h-7z"/></svg></div><h3>Prompt cache</h3><p>Opt-in TTL cache returns identical requests instantly with <code>X-Cache: HIT</code> and no provider call — streaming replays as SSE.</p></div>
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><h3>Encrypted keys</h3><p>Provider keys are AES-256-GCM encrypted in SQLite; apps only ever see one unified <code>freellmapi-…</code> bearer token.</p></div>
+      <div class="feature reveal"><div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/></svg></div><h3>Admin dashboard</h3><p>Manage keys, drag the fallback chain, watch latency percentiles, cache hit-rate, and a live request log — dark & light.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- PROVIDERS -->
+<section id="providers" style="padding-top:24px;">
+  <div class="container">
+    <div class="eyebrow reveal">Stack the free tiers</div>
+    <h2 class="section-title reveal">Sixteen providers, plus any custom endpoint</h2>
+    <div class="prov-grid reveal" id="prov-grid" style="margin-top:28px;"></div>
+    <p class="section-sub reveal" style="margin-top:20px;">➕ Point at any OpenAI-compatible endpoint too — llama.cpp, LM Studio, vLLM, a local Ollama, or a remote gateway — straight from the Keys page.</p>
+  </div>
+</section>
+
+<!-- SCREENSHOTS -->
+<section style="padding-top:24px;">
+  <div class="container">
+    <div class="eyebrow reveal">The control room</div>
+    <h2 class="section-title reveal">A dashboard that earns its pixels</h2>
+    <div class="shots reveal" style="margin-top:28px;">
+      <div class="shot"><img src="https://raw.githubusercontent.com/Hansade2005/FreeAIGateway/main/repo-assets/analytics.png" alt="Analytics" loading="lazy" /><div class="cap"><b>Analytics</b> — success rate, latency percentiles, cache hit-rate, per-model breakdown, live log.</div></div>
+      <div class="shot"><img src="https://raw.githubusercontent.com/Hansade2005/FreeAIGateway/main/repo-assets/settings.png" alt="Settings" loading="lazy" /><div class="cap"><b>Settings</b> — unified key, both protocol endpoints, prompt cache, built-in tools.</div></div>
+      <div class="shot"><img src="https://raw.githubusercontent.com/Hansade2005/FreeAIGateway/main/repo-assets/playground.png" alt="Playground" loading="lazy" /><div class="cap"><b>Playground</b> — chat, multi-model compare, and image generation.</div></div>
+      <div class="shot"><img src="https://raw.githubusercontent.com/Hansade2005/FreeAIGateway/main/repo-assets/keys.png" alt="Keys" loading="lazy" /><div class="cap"><b>Keys</b> — add providers, health status, drag the fallback order.</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section style="padding-top:24px;">
+  <div class="container">
+    <div class="eyebrow reveal">How it works</div>
+    <h2 class="section-title reveal">Your request, routed the smart way</h2>
+    <div class="flow reveal" style="margin-top:32px;">
+      <div class="flow-node"><div class="t">Your app</div><div class="d">OpenAI or Anthropic SDK</div></div>
+      <div class="arrow">→</div>
+      <div class="flow-node accent"><div class="t">FreeAIGateway</div><div class="d">auth · cache · router · retry</div></div>
+      <div class="arrow">→</div>
+      <div class="flow-node"><div class="t">Best free provider</div><div class="d">scored by reliability · speed · cost</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- QUICK START -->
+<section id="start" style="padding-top:24px;">
+  <div class="container">
+    <div class="eyebrow reveal">Up in two minutes</div>
+    <h2 class="section-title reveal">Quick start</h2>
+    <div class="steps reveal" style="margin-top:28px;">
+      <div class="step"><div class="n">1</div><h3>Run it</h3><p>Docker Compose serves the API + dashboard on port 3001, SQLite in a named volume.</p></div>
+      <div class="step"><div class="n">2</div><h3>Add your keys</h3><p>Open the dashboard, paste provider keys (many work anonymously), order the fallback chain.</p></div>
+      <div class="step"><div class="n">3</div><h3>Point your SDK</h3><p>Swap <code>base_url</code> to your gateway and use the one unified key. Done.</p></div>
+    </div>
+    <div class="code-card reveal">
+      <div class="code-tabs"><span class="code-tab" aria-selected="true" style="cursor:default">Docker (recommended)</span></div>
+      <div class="code-wrap"><button class="copy">Copy</button><pre><code><span class="tok-k">git</span> clone https://github.com/Hansade2005/FreeAIGateway.git
+<span class="tok-k">cd</span> FreeAIGateway
+
+<span class="tok-c"># generate an at-rest encryption key for your provider keys</span>
+ENCRYPTION_KEY=<span class="tok-s">"$(openssl rand -hex 32)"</span>
+<span class="tok-k">printf</span> <span class="tok-s">"ENCRYPTION_KEY=%s\nPORT=3001\n"</span> <span class="tok-s">"$ENCRYPTION_KEY"</span> > .env
+
+<span class="tok-k">docker</span> compose up -d   <span class="tok-c"># → http://localhost:3001</span></code></pre></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section style="padding-top:24px;">
+  <div class="container">
+    <div class="cta-band reveal">
+      <h2 class="display">Stop juggling sixteen SDKs.</h2>
+      <p>Self-hosted, single-user, MIT-licensed. One endpoint, two protocols, ~1.7B free tokens a month.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">View on GitHub →</a>
-        <a class="btn btn-secondary" href="#start">Quick start</a>
+        <a class="btn btn-ghost" href="#start">Quick start</a>
       </div>
-    </header>
-
-    <div class="tokens-stat">
-      <div class="tokens-label">Aggregate monthly free budget</div>
-      <div class="tokens-number">1.7B</div>
-      <div class="tokens-unit">tokens · per month</div>
-      <div class="tokens-sub">Across 100+ free-tier models on 16 providers, plus any custom OpenAI-compatible endpoint. Mistral alone contributes ~1B; everything else is bonus.</div>
     </div>
-
-    <section id="providers">
-      <div class="section-header">
-        <div class="section-eyebrow">The catalog</div>
-        <h2>Every free tier worth using</h2>
-        <p class="section-sub">Only providers with <strong>recurring</strong> free quotas, no credit card required, and a self-serve API.</p>
-      </div>
-      <div class="provider-grid">
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/google.svg" alt="" /></span>Google Gemini</div>
-          <div class="provider-tokens"><span class="num">~3M</span><span class="unit">/mo</span><span class="label">per model</span></div>
-          <div class="provider-models">Gemini 2.5 Flash · Flash-Lite · 3.1 Pro/Flash previews. <b>20 RPD per model</b>.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/openrouter.svg" alt="" /></span>OpenRouter</div>
-          <div class="provider-tokens"><span class="num">~6M</span><span class="unit">/mo</span><span class="label">per model</span></div>
-          <div class="provider-models">19 <code>:free</code> models — DeepSeek, Kimi, Qwen, Llama, Gemma, Nemotron, Tencent HY3 …</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/cerebras.svg" alt="" /></span>Cerebras</div>
-          <div class="provider-tokens"><span class="num">~30M</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">Qwen3 235B · GPT-OSS 120B · Llama 3.1 8B. <b>1M TPD · 30 RPM</b>. Fastest tokens you'll ever see.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/groq.svg" alt="" /></span>Groq</div>
-          <div class="provider-tokens"><span class="num">~30M</span><span class="unit">/mo</span><span class="label">per model</span></div>
-          <div class="provider-models">Llama 3.3 70B · Llama 4 Scout · GPT-OSS 120B/20B · Qwen3 32B. <b>1000 RPD</b>.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/mistral.svg" alt="" /></span>Mistral La Plateforme</div>
-          <div class="provider-tokens"><span class="num">~1B</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">Mistral Large/Medium · Codestral · Devstral · Magistral. The biggest free pool of any provider.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/github.svg" alt="" /></span>GitHub Models</div>
-          <div class="provider-tokens"><span class="num">~18M</span><span class="unit">/mo</span><span class="label">est.</span></div>
-          <div class="provider-models">GPT-4.1 · GPT-4o. <b>50 RPD</b> on the free Copilot tier. Higher caps with paid Copilot.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/sambanova.jpg" alt="" /></span>SambaNova</div>
-          <div class="provider-tokens"><span class="num">~3M</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">DeepSeek V3.1/V3.2 · Llama 4 Maverick · Llama 3.3 70B · Gemma 3 12B · GPT-OSS 120B.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/cloudflare.svg" alt="" /></span>Cloudflare Workers AI</div>
-          <div class="provider-tokens"><span class="num">~20M</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">Kimi K2.5/K2.6 · Qwen3 30B · GLM-4.7 Flash · Llama 4 Scout · IBM Granite 4.0. <b>10K Neurons/day</b>.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/zai.svg" alt="" /></span>Z.ai (Zhipu)</div>
-          <div class="provider-tokens"><span class="num">~30M</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">GLM-4.5 Flash · GLM-4.7 Flash. Both <code>:free</code> — perpetually, no card.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/cohere.svg" alt="" /></span>Cohere</div>
-          <div class="provider-tokens"><span class="num">~1-2M</span><span class="unit">/mo</span><span class="label">shared</span></div>
-          <div class="provider-models">Command R+. Trial key: <b>1000 calls/month</b>, 20 RPM.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon"><img src="logos/nvidia.svg" alt="" /></span>NVIDIA NIM</div>
-          <div class="provider-tokens"><span class="num">credits</span><span class="unit"></span><span class="label">disabled</span></div>
-          <div class="provider-models">Llama 3.1 70B. Disabled by default — credit-based, not recurring.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:12px;font-weight:700;color:var(--muted)">HF</span>HuggingFace</div>
-          <div class="provider-tokens"><span class="num">~3M</span><span class="unit">/mo</span><span class="label">router credit</span></div>
-          <div class="provider-models">Inference Providers router → DeepSeek V4 · Kimi K2.6 · Qwen3. Recurring router credit, no card.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:12px;font-weight:700;color:var(--muted)">OL</span>Ollama Cloud</div>
-          <div class="provider-tokens"><span class="num">free</span><span class="unit"></span><span class="label">GPU-time</span></div>
-          <div class="provider-models">GLM-4.7 · Kimi K2 · gpt-oss · Qwen3. Free plan: 1 concurrent model, session/GPU-time caps.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:14px;font-weight:700;color:var(--muted)">K</span>Kilo Gateway</div>
-          <div class="provider-tokens"><span class="num">anon</span><span class="unit"></span><span class="label">~200/hr</span></div>
-          <div class="provider-models"><code>:free</code> routes — anonymous access works per-IP; a key raises the limit.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:14px;font-weight:700;color:var(--muted)">P</span>Pollinations</div>
-          <div class="provider-tokens"><span class="num">anon</span><span class="unit"></span><span class="label">free tier</span></div>
-          <div class="provider-models">GPT-OSS 20B (<code>openai-fast</code>), tools supported. Anonymous tier, no key.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:12px;font-weight:700;color:var(--muted)">L7</span>LLM7</div>
-          <div class="provider-tokens"><span class="num">anon</span><span class="unit"></span><span class="label">~100/hr</span></div>
-          <div class="provider-models">GPT-OSS · Llama 3.1 Turbo · Codestral · GLM via one token. Anonymous access works.</div>
-        </div>
-        <div class="provider-card">
-          <div class="provider-name"><span class="provider-icon" style="font-size:18px;font-weight:700;color:var(--muted)">+</span>Custom endpoint</div>
-          <div class="provider-tokens"><span class="num">∞</span><span class="unit"></span><span class="label">your server</span></div>
-          <div class="provider-models">Point at any OpenAI-compatible URL — llama.cpp, LM Studio, vLLM, a local Ollama, or a remote gateway.</div>
-        </div>
-      </div>
-    </section>
-
-    <section id="start">
-      <div class="section-header">
-        <div class="section-eyebrow">Three minutes to first token</div>
-        <h2>Quick start</h2>
-      </div>
-
-      <div class="steps" style="margin-bottom: 32px;">
-        <div class="step">
-          <div class="step-num">1</div>
-          <h3>Clone &amp; install</h3>
-          <p>Node 20+ required. <code>better-sqlite3</code> brings prebuilt binaries — no compile step.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">2</div>
-          <h3>Drop in your keys</h3>
-          <p>Sign up free at each provider, paste keys into the dashboard. No credit card needed for any of them.</p>
-        </div>
-        <div class="step">
-          <div class="step-num">3</div>
-          <h3>Point your SDK</h3>
-          <p>Set <code>base_url</code> to your local proxy. Use any OpenAI-compatible client — Cursor, the SDK, curl, anything.</p>
-        </div>
-      </div>
-
-      <div class="terminal">
-        <div class="terminal-chrome">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="filename">~/FreeAIGateway · zsh</span>
-        </div>
-        <pre class="terminal-body"><span class="c"># 1. clone, install, run</span>
-<span class="prompt">$</span><span class="k">git</span> clone https://github.com/Hansade2005/FreeAIGateway.git
-<span class="prompt">$</span><span class="k">cd</span> FreeAIGateway
-<span class="prompt">$</span>npm install <span class="k">&amp;&amp;</span> npm run dev
-<span class="blank"></span>
-<span class="c"># 2. open http://localhost:3001 — paste keys in the UI</span>
-<span class="blank"></span>
-<span class="c"># 3. call it like OpenAI</span>
-<span class="prompt">$</span><span class="k">curl</span> http://localhost:3001/v1/chat/completions \
-    -H <span class="s">"Content-Type: application/json"</span> \
-    -d <span class="s">'{"messages":[{"role":"user","content":"hi"}]}'</span></pre>
-      </div>
-    </section>
-
-    <footer>
-      <p>FreeAIGateway — open source, self-hosted, single-user. <a href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">github.com/Hansade2005/FreeAIGateway</a></p>
-      <p style="margin-top: 6px; opacity: 0.7;">Built for personal use only. Each provider's ToS applies — don't expose this proxy publicly.</p>
-    </footer>
   </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container">
+    <div class="foot-inner">
+      <span>FreeAIGateway — open source, self-hosted, single-user.</span>
+      <span><a href="https://github.com/Hansade2005/FreeAIGateway" target="_blank" rel="noopener">github.com/Hansade2005/FreeAIGateway</a> · MIT</span>
+    </div>
+    <p class="disclaimer">Independent project, not affiliated with or endorsed by any listed provider. You are responsible for complying with each provider's terms of service. Intended for personal experimentation; provider free tiers and limits change without notice.</p>
+  </div>
+</footer>
+
+<script>
+  // ── Theme toggle (persisted) ──
+  const root = document.documentElement;
+  const saved = localStorage.getItem('fag-theme');
+  if (saved) root.setAttribute('data-theme', saved);
+  const moon = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+  const sun = document.getElementById('theme-icon').outerHTML;
+  function syncIcon(){ document.getElementById('theme-toggle').innerHTML = root.getAttribute('data-theme') === 'light' ? moon : sun; }
+  syncIcon();
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    root.setAttribute('data-theme', next); localStorage.setItem('fag-theme', next); syncIcon();
+  });
+
+  // ── Code tabs ──
+  document.querySelectorAll('#protocols .code-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const card = tab.closest('.code-card');
+      card.querySelectorAll('.code-tab').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+      card.querySelectorAll('.code-panel').forEach(p => p.hidden = p.dataset.panel !== tab.dataset.tab);
+    });
+  });
+
+  // ── Copy buttons ──
+  document.querySelectorAll('.copy').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const code = btn.parentElement.querySelector('code').innerText;
+      try { await navigator.clipboard.writeText(code); const o = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => btn.textContent = o, 1400); } catch {}
+    });
+  });
+
+  // ── Provider wall ──
+  const providers = [
+    ['Google','Gemini 2.5 · 3.x','google','https://ai.google.dev'],
+    ['Groq','Llama · GPT-OSS · Qwen3','groq','https://groq.com'],
+    ['Cerebras','Qwen3 235B','cerebras','https://cerebras.ai'],
+    ['SambaNova','DeepSeek · Llama 4','sambanova','https://cloud.sambanova.ai'],
+    ['Mistral','Large 3 · Codestral','mistral','https://mistral.ai'],
+    ['OpenRouter','21 free models','openrouter','https://openrouter.ai'],
+    ['GitHub Models','GPT-4.1 · GPT-4o','github','https://github.com/marketplace/models'],
+    ['Cloudflare','Kimi · GLM · Granite','cloudflare','https://developers.cloudflare.com/workers-ai'],
+    ['Cohere','Command R+ · A','cohere','https://cohere.com'],
+    ['Z.ai (Zhipu)','GLM-4.7 Flash','zai','https://docs.z.ai'],
+    ['NVIDIA','NIM','nvidia','https://build.nvidia.com'],
+    ['HuggingFace','Router → DeepSeek','',''],
+    ['Ollama Cloud','GLM · Kimi · Qwen3','',''],
+    ['Kilo Gateway',':free (anon ok)','',''],
+    ['Pollinations','GPT-OSS 20B (anon)','',''],
+    ['LLM7','GPT-OSS · GLM (anon)','',''],
+  ];
+  const grid = document.getElementById('prov-grid');
+  grid.innerHTML = providers.map(([name, sub, logo, href]) => {
+    const inner = logo ? `<img src="logos/${logo}.svg" alt="" onerror="this.replaceWith(document.createTextNode('${name[0]}'))"/>` : name[0];
+    const tag = href ? 'a' : 'div';
+    const attrs = href ? ` href="${href}" target="_blank" rel="noopener"` : '';
+    return `<${tag} class="prov"${attrs}><span class="pi">${inner}</span><span><span class="pt">${name}</span><br><span class="ps">${sub}</span></span></${tag}>`;
+  }).join('');
+
+  // ── Logo marquee (duplicated for seamless loop) ──
+  const marqueeItems = [
+    ['google','Google'],['groq','Groq'],['cerebras','Cerebras'],['sambanova','SambaNova'],
+    ['mistral','Mistral'],['openrouter','OpenRouter'],['github','GitHub'],['cloudflare','Cloudflare'],
+    ['cohere','Cohere'],['zai','Z.ai'],['nvidia','NVIDIA'],
+  ];
+  const one = marqueeItems.map(([f,n]) => `<img src="logos/${f}.svg" alt="${n}" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'name',textContent:'${n}'}))"/>`).join('');
+  document.getElementById('marquee').innerHTML = one + one;
+
+  // ── Reveal on scroll ──
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+  }, { threshold: 0.12 });
+  document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+</script>
 </body>
 </html>
