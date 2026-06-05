@@ -114,19 +114,20 @@ register(new OpenAICompatProvider({
 }));
 
 // Kilo AI Gateway — OpenAI-compatible aggregator. Kilo documents anonymous
-// (keyless) access for `:free` routes, rate-limited 200 req/hr per IP — so this
-// is registered `keyless: true`: the provider omits the Authorization header and
-// the Keys page stores a sentinel row so routing treats it as configured. Free
-// prompts/outputs are logged for training. validateUrl points at the gateway's
-// real model list (`/api/gateway/models`, no `/v1`) which answers GET keyless;
-// the `/v1/models` path only accepts POST (405). Probe before adding catalog
-// rows — most named "free" routes eventually transition to paid.
+// access for `:free` routes (rate-limited 200 req/hr per IP) AND accepts an API
+// key for higher limits / non-free routes — so this is registered
+// `optionalKey: true`: add it without a key to run anonymously (the Keys page
+// stores a sentinel row and the provider omits the Authorization header), or add
+// a key to send it as a bearer. Free prompts/outputs are logged for training.
+// validateUrl points at the gateway's real model list (`/api/gateway/models`, no
+// `/v1`) which answers GET; the `/v1/models` path only accepts POST (405). Probe
+// before adding catalog rows — most named "free" routes eventually go paid.
 register(new OpenAICompatProvider({
   platform: 'kilo',
   name: 'Kilo Gateway',
   baseUrl: 'https://api.kilo.ai/api/gateway/v1',
   validateUrl: 'https://api.kilo.ai/api/gateway/models',
-  keyless: true,
+  optionalKey: true,
 }));
 
 // Pollinations — OpenAI-compatible, anonymous tier. The chat completions

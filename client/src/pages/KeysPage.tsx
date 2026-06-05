@@ -30,10 +30,10 @@ function GetKeyLink({ url }: { url: string }) {
 // `url` points to each provider's key-management / signup page so the Keys page
 // can show a "Get API key" shortcut (#137). OpenCode Zen's key is free from
 // opencode.ai/auth — no card needed; billing only applies to paid models (#128).
-// `keyless: true` providers (Kilo's anonymous free tier) need no API key — the
-// form disables the key field and submits a sentinel the backend stores so
-// routing treats the platform as configured.
-const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolean }[] = [
+// `keyless: true` providers need no API key — the form disables the key field
+// and submits a sentinel. `optionalKey: true` providers (Kilo) work anonymously
+// too, but ALSO accept a key: the field stays enabled and may be left blank.
+const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolean; optionalKey?: boolean }[] = [
   { value: 'google', label: 'Google AI Studio', url: 'https://aistudio.google.com/apikey' },
   { value: 'groq', label: 'Groq', url: 'https://console.groq.com/keys' },
   { value: 'cerebras', label: 'Cerebras', url: 'https://cloud.cerebras.ai' },
@@ -46,7 +46,7 @@ const PLATFORMS: { value: Platform; label: string; url: string; keyless?: boolea
   { value: 'cloudflare', label: 'Cloudflare Workers AI', url: 'https://dash.cloudflare.com' },
   { value: 'zhipu', label: 'Zhipu AI (Z.ai)', url: 'https://z.ai/manage-apikey/apikey-list' },
   { value: 'ollama', label: 'Ollama Cloud', url: 'https://ollama.com/settings/keys' },
-  { value: 'kilo', label: 'Kilo Gateway (no key needed)', url: 'https://app.kilo.ai', keyless: true },
+  { value: 'kilo', label: 'Kilo Gateway (key optional)', url: 'https://app.kilo.ai', optionalKey: true },
   { value: 'pollinations', label: 'Pollinations (anon ok)', url: 'https://pollinations.ai' },
   { value: 'llm7', label: 'LLM7 (anon ok)', url: 'https://llm7.io' },
   { value: 'huggingface', label: 'HuggingFace Router', url: 'https://huggingface.co/settings/tokens' },
@@ -363,15 +363,19 @@ export default function KeysPage() {
   }, [editingKeyId])
 
   const needsAccountId = platform === 'cloudflare'
-  const isKeyless = PLATFORMS.find(p => p.value === platform)?.keyless ?? false
+  const selectedPlatform = PLATFORMS.find(p => p.value === platform)
+  const isKeyless = selectedPlatform?.keyless ?? false
+  const isOptionalKey = selectedPlatform?.optionalKey ?? false
+  const keyRequired = !isKeyless && !isOptionalKey // a key is mandatory
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!platform) return
-    if (!isKeyless && !apiKey) return
+    if (keyRequired && !apiKey) return
     if (needsAccountId && !accountId) return
-    // Keyless providers submit an empty key; the backend stores a sentinel.
-    const key = isKeyless ? '' : (needsAccountId ? `${accountId}:${apiKey}` : apiKey)
+    // Keyless → empty key (sentinel). Optional-key → the entered key, or empty
+    // for anonymous mode. Everyone else → the key (with account id if needed).
+    const key = isKeyless ? '' : (needsAccountId && apiKey ? `${accountId}:${apiKey}` : apiKey)
     addKey.mutate({ platform, key, label: label || undefined })
   }
 
@@ -437,13 +441,18 @@ export default function KeysPage() {
                 type="password"
                 value={isKeyless ? '' : apiKey}
                 onChange={e => setApiKey(e.target.value)}
-                placeholder={isKeyless ? 'No API key needed' : (needsAccountId ? 'Bearer token' : 'paste key here')}
+                placeholder={isKeyless ? 'No API key needed' : isOptionalKey ? 'optional — blank = anonymous' : (needsAccountId ? 'Bearer token' : 'paste key here')}
                 className="font-mono text-xs"
                 disabled={isKeyless}
               />
               {isKeyless && (
                 <p className="text-[11px] text-muted-foreground">
                   No API key needed: this provider's free tier is anonymous (rate-limited per IP).
+                </p>
+              )}
+              {isOptionalKey && (
+                <p className="text-[11px] text-muted-foreground">
+                  Optional: leave blank to use the anonymous free tier (rate-limited per IP), or add a key for higher limits.
                 </p>
               )}
             </div>
@@ -456,8 +465,8 @@ export default function KeysPage() {
                   placeholder="optional"
                   className="w-[160px]"
                 />
-                <Button type="submit" size="sm" disabled={!platform || (!isKeyless && !apiKey) || (needsAccountId && !accountId) || addKey.isPending}>
-                  {addKey.isPending ? 'Adding…' : isKeyless ? 'Enable' : 'Add key'}
+                <Button type="submit" size="sm" disabled={!platform || (keyRequired && !apiKey) || (needsAccountId && !accountId) || addKey.isPending}>
+                  {addKey.isPending ? 'Adding…' : (isKeyless || (isOptionalKey && !apiKey)) ? 'Enable' : 'Add key'}
                 </Button>
               </div>
             </div>
