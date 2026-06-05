@@ -37,7 +37,7 @@ describe('builtin-tools service', () => {
     vi.stubGlobal('fetch', (url: any) => { called = String(url); return Promise.resolve(new Response('result text', { status: 200 })); });
     const out = await executeBuiltinTool('web_search', JSON.stringify({ query: 'latest news' }));
     expect(called).toContain('https://r.jina.ai/https://html.duckduckgo.com/html?q=latest%20news');
-    expect(out).toContain('result text');
+    expect(out.content).toContain('result text');
   });
 
   it('web_extract proxies the URL through jina reader', async () => {
@@ -45,21 +45,23 @@ describe('builtin-tools service', () => {
     vi.stubGlobal('fetch', (url: any) => { called = String(url); return Promise.resolve(new Response('# Page', { status: 200 })); });
     const out = await executeBuiltinTool('web_extract', JSON.stringify({ url: 'https://example.com/post' }));
     expect(called).toBe('https://r.jina.ai/https://example.com/post');
-    expect(out).toContain('# Page');
+    expect(out.content).toContain('# Page');
   });
 
-  it('generate_image fetches a0.dev and returns a saved temp PNG path', async () => {
+  it('generate_image saves a temp PNG and returns a servable basename', async () => {
     let called = '';
     vi.stubGlobal('fetch', (url: any) => { called = String(url); return Promise.resolve(new Response(Buffer.from('89504e47', 'hex'), { status: 200 })); });
     const out = await executeBuiltinTool('generate_image', JSON.stringify({ prompt: 'a fox', aspect: '16:9' }));
     expect(called).toContain('api.a0.dev/assets/image');
     expect(called).toContain('aspect=16:9');
-    expect(out).toMatch(/saved to: .+freeaigateway-images.+\.png/);
+    expect(out.content).toMatch(/saved to: .+freeaigateway-images.+\.png/);
+    // Basename matches the pattern GET /v1/images/files/:name will serve.
+    expect(out.imageFile).toMatch(/^img-\d+-[0-9a-f]+\.png$/);
   });
 
   it('a tool failure resolves to an error string (never throws into the loop)', async () => {
     vi.stubGlobal('fetch', () => Promise.resolve(new Response('nope', { status: 500 })));
     const out = await executeBuiltinTool('web_search', JSON.stringify({ query: 'x' }));
-    expect(out).toContain('failed');
+    expect(out.content).toContain('failed');
   });
 });

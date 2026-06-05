@@ -137,9 +137,19 @@ async function webExtract(url: string): Promise<string> {
   return fetchText(`https://r.jina.ai/${url}`);
 }
 
+// The model gets `content` as the tool result; `imageFile` (a basename served
+// by GET /v1/images/files/:name) lets the gateway surface generated images
+// inline to the caller.
+export interface BuiltinToolResult {
+  content: string;
+  imageFile?: string;
+}
+
+export const IMAGE_DIR = path.join(os.tmpdir(), 'freeaigateway-images');
+
 // Fetch the generated asset and persist it as a PNG in the OS temp dir, then
-// return the path so the model (and the caller) can reference the file.
-async function generateImage(prompt: string, aspect?: string): Promise<string> {
+// return its path (for the model) and basename (so the caller can serve it).
+async function generateImage(prompt: string, aspect?: string): Promise<BuiltinToolResult> {
   const ratio = aspect === '16:9' || aspect === '9:16' || aspect === '1:1' ? aspect : '1:1';
   const url = `https://api.a0.dev/assets/image?text=${encodeURIComponent(prompt)}&aspect=${ratio}`;
   const controller = new AbortController();
@@ -148,30 +158,33 @@ async function generateImage(prompt: string, aspect?: string): Promise<string> {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`a0.dev ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
-    const dir = path.join(os.tmpdir(), 'freeaigateway-images');
-    fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, `img-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.png`);
+    fs.mkdirSync(IMAGE_DIR, { recursive: true });
+    const name = `img-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.png`;
+    const file = path.join(IMAGE_DIR, name);
     fs.writeFileSync(file, buf);
-    return `Image generated and saved to: ${file}\n(prompt: "${prompt}", aspect: ${ratio}, source: ${url})`;
+    return {
+      content: `Image generated and saved to: ${file}\n(prompt: "${prompt}", aspect: ${ratio}). It is shown to the user automatically — no need to repeat the URL.`,
+      imageFile: name,
+    };
   } finally {
     clearTimeout(timer);
   }
 }
 
 // Execute a built-in tool by name. `argsJson` is the model's raw arguments
-// string. Always resolves to a string (errors included) so the agent loop can
+// string. Always resolves (errors included as content) so the agent loop can
 // hand the model a tool result and continue rather than crashing the request.
-export async function executeBuiltinTool(name: string, argsJson: string): Promise<string> {
+export async function executeBuiltinTool(name: string, argsJson: string): Promise<BuiltinToolResult> {
   let args: any = {};
   try { args = argsJson ? JSON.parse(argsJson) : {}; } catch { /* tolerate non-JSON */ }
   try {
     switch (name) {
-      case 'web_search': return await webSearch(String(args.query ?? ''));
-      case 'web_extract': return await webExtract(String(args.url ?? ''));
+      case 'web_search': return { content: await webSearch(String(args.query ?? '')) };
+      case 'web_extract': return { content: await webExtract(String(args.url ?? '')) };
       case 'generate_image': return await generateImage(String(args.prompt ?? ''), args.aspect);
-      default: return `Unknown tool: ${name}`;
+      default: return { content: `Unknown tool: ${name}` };
     }
   } catch (err: any) {
-    return `Tool "${name}" failed: ${err?.message ?? 'unknown error'}`;
+    return { content: `Tool "${name}" failed: ${err?.message ?? 'unknown error'}` };
   }
 }

@@ -101,7 +101,17 @@ function ChatConsole() {
     queryKey: ['fallback'],
     queryFn: () => apiFetch('/api/fallback'),
   })
+  const { data: toolsCfg } = useQuery<{ enabled: boolean }>({
+    queryKey: ['tools'],
+    queryFn: () => apiFetch('/api/settings/tools'),
+  })
   const availableModels = fallbackEntries.filter((e) => e.keyCount > 0 && e.enabled)
+
+  // Gateway built-in tools (web search / extract / image gen) only run on the
+  // OpenAI auto-routed, non-streaming path. When they're active we drop
+  // streaming so the model can call them and we get the finished answer —
+  // generated images arrive as inline markdown and render in the transcript.
+  const builtinActive = !!toolsCfg?.enabled && model === 'auto' && protocol === 'openai'
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
@@ -111,9 +121,9 @@ function ChatConsole() {
     return h
   }
 
-  // Tools/images take the non-streaming path (structured tool_calls and vision
-  // are simpler and more reliable to parse whole); plain text streams.
-  const streaming = !toolsOn && !image
+  // Tools/images/built-ins take the non-streaming path (structured tool_calls,
+  // vision, and the server-side tool loop are simpler whole); plain text streams.
+  const streaming = !toolsOn && !image && !builtinActive
 
   function buildTools(): any[] | undefined {
     if (!toolsOn) return undefined
@@ -414,6 +424,11 @@ function ChatConsole() {
             <button onClick={() => setToolsEditorOpen((v) => !v)} className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground">
               {toolsEditorOpen ? 'Hide' : 'Edit'} tools JSON · streaming off while tools/image attached
             </button>
+          )}
+          {builtinActive && !toolsOn && !image && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+              <Sparkles className="size-3 text-signal" /> Gateway tools on — ask it to search the web or “generate an image of …” and results render inline.
+            </p>
           )}
         </div>
       </div>

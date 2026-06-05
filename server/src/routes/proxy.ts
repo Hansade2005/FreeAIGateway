@@ -29,19 +29,33 @@ async function resolveBuiltinToolCalls(
   first: ChatCompletionResponse,
   messages: ChatMessage[],
   opts: CompletionOptions,
+  origin: string,
 ): Promise<ChatCompletionResponse> {
   let current = first;
   const convo: ChatMessage[] = [...messages];
+  const imageUrls: string[] = [];
   for (let i = 0; i < MAX_BUILTIN_TOOL_ITERS; i++) {
     const calls = current.choices?.[0]?.message?.tool_calls ?? [];
     if (calls.length === 0) break;
     if (!calls.every((c) => isBuiltinTool(c.function.name))) break; // client tool present
     convo.push(current.choices[0].message);
     for (const c of calls) {
-      const output = await executeBuiltinTool(c.function.name, c.function.arguments);
-      convo.push({ role: 'tool', tool_call_id: c.id, content: output });
+      const result = await executeBuiltinTool(c.function.name, c.function.arguments);
+      convo.push({ role: 'tool', tool_call_id: c.id, content: result.content });
+      // A generated PNG is served by GET /v1/images/files/:name (same temp dir).
+      if (result.imageFile) imageUrls.push(`${origin}/v1/images/files/${result.imageFile}`);
     }
     current = await provider.chatCompletion(apiKey, convo, modelId, opts);
+  }
+  // Surface generated images inline: append them as markdown to the final
+  // answer so any markdown-rendering client (e.g. the Playground) shows them.
+  if (imageUrls.length) {
+    const msg = current.choices?.[0]?.message;
+    if (msg) {
+      const base = contentToString(msg.content ?? '');
+      const imgs = imageUrls.map((u) => `![generated image](${u})`).join('\n\n');
+      msg.content = base ? `${base}\n\n${imgs}` : imgs;
+    }
   }
   return current;
 }
@@ -465,6 +479,9 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // and only when a tool-capable model actually exists to run them.
   const clientSentTools = (tools?.length ?? 0) > 0;
   const autoRouted = !requestedModel || isAutoModel(requestedModel);
+  // Non-streaming only: the agent loop makes several upstream calls, which can't
+  // run over a live token stream. Clients that want the tools send stream:false
+  // (the Playground does this automatically when built-ins are active).
   const useBuiltinTools = !stream && builtinCfg.enabled && !builtinOptOut && !clientSentTools && autoRouted && hasEnabledToolsModel();
   const builtinToolDefs: ChatToolDefinition[] = useBuiltinTools ? getEnabledBuiltinToolDefs(builtinCfg) : [];
   const effectiveTools = builtinToolDefs.length ? [...(tools ?? []), ...builtinToolDefs] : tools;
@@ -784,7 +801,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         // Built-in tool agent loop: resolve any gateway-executed tool calls
         // server-side before returning, so the client gets a finished answer.
         if (builtinToolDefs.length) {
-          result = await resolveBuiltinToolCalls(route.provider, route.apiKey, route.modelId, result, messages, completionOpts);
+          const origin = `${req.protocol}://${req.get('host')}`;
+          result = await resolveBuiltinToolCalls(route.provider, route.apiKey, route.modelId, result, messages, completionOpts, origin);
         }
 
         // Empty completion (no text, no tool calls) → fail over rather than
