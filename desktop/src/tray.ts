@@ -16,7 +16,7 @@ export function buildTray(port: number, token: string): Tray {
   icon.setTemplateImage(true); // auto light/dark tint in the macOS menu bar
 
   tray = new Tray(icon);
-  tray.setToolTip('FreeLLMAPI — local LLM router');
+  tray.setToolTip('FreeAIGateway — local LLM router');
 
   tray.on('click', () => togglePopover(tray!));
   tray.on('right-click', () => {
@@ -24,7 +24,7 @@ export function buildTray(port: number, token: string): Tray {
       { label: `Running on 127.0.0.1:${port}`, enabled: false },
       { label: 'Open Dashboard', click: () => openDashboard(port, token) },
       { type: 'separator' },
-      { label: 'Quit FreeLLMAPI', click: () => app.quit() },
+      { label: 'Quit FreeAIGateway', click: () => app.quit() },
     ]));
   });
 

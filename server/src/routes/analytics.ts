@@ -255,3 +255,78 @@ analyticsRouter.get('/errors', (req: Request, res: Response) => {
     createdAt: r.created_at,
   })));
 });
+
+// Latency percentiles (p50/p95/p99) for total latency and TTFB. SQLite has no
+// percentile function, so we pull the successful-request samples for the range
+// and compute in JS — overall plus a per-model breakdown (busiest first).
+function percentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1));
+  return sorted[idx];
+}
+
+analyticsRouter.get('/latency', (req: Request, res: Response) => {
+  const range = (req.query.range as string) ?? '7d';
+  const since = getSinceTimestamp(range);
+  const db = getDb();
+
+  const rows = db.prepare(`
+    SELECT platform, model_id, latency_ms, ttfb_ms
+    FROM requests
+    WHERE status = 'success' AND created_at >= ? AND latency_ms IS NOT NULL
+  `).all(since) as { platform: string; model_id: string; latency_ms: number; ttfb_ms: number | null }[];
+
+  const summarize = (samples: { latency_ms: number; ttfb_ms: number | null }[]) => {
+    const lat = samples.map(s => s.latency_ms).sort((a, b) => a - b);
+    const ttfb = samples.map(s => s.ttfb_ms).filter((v): v is number => v != null).sort((a, b) => a - b);
+    return {
+      count: samples.length,
+      latency: { p50: percentile(lat, 50), p95: percentile(lat, 95), p99: percentile(lat, 99) },
+      ttfb: ttfb.length ? { p50: percentile(ttfb, 50), p95: percentile(ttfb, 95), p99: percentile(ttfb, 99) } : null,
+    };
+  };
+
+  const byModel = new Map<string, { platform: string; model_id: string; samples: typeof rows }>();
+  for (const r of rows) {
+    const key = `${r.platform}/${r.model_id}`;
+    if (!byModel.has(key)) byModel.set(key, { platform: r.platform, model_id: r.model_id, samples: [] });
+    byModel.get(key)!.samples.push(r);
+  }
+
+  res.json({
+    overall: summarize(rows),
+    byModel: Array.from(byModel.values())
+      .map(m => ({ platform: m.platform, modelId: m.model_id, ...summarize(m.samples) }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12),
+  });
+});
+
+// Recent request feed (all statuses) for the live request log.
+analyticsRouter.get('/recent', (req: Request, res: Response) => {
+  const db = getDb();
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60));
+  const status = req.query.status as string | undefined;
+  const where = status === 'success' || status === 'error' ? `WHERE status = '${status}'` : '';
+
+  const rows = db.prepare(`
+    SELECT id, platform, model_id, status, input_tokens, output_tokens, latency_ms, ttfb_ms, error, created_at
+    FROM requests
+    ${where}
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(limit) as any[];
+
+  res.json(rows.map(r => ({
+    id: r.id,
+    platform: r.platform,
+    modelId: r.model_id,
+    status: r.status,
+    inputTokens: r.input_tokens,
+    outputTokens: r.output_tokens,
+    latencyMs: r.latency_ms,
+    ttfbMs: r.ttfb_ms,
+    error: r.error,
+    createdAt: r.created_at,
+  })));
+});

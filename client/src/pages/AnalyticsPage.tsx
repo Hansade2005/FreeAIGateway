@@ -80,6 +80,26 @@ export default function AnalyticsPage() {
     queryFn: () => apiFetch<{ byCategory: any[]; byPlatform: any[]; detailed: any[] }>(`/api/analytics/error-distribution?range=${range}`),
   })
 
+  const { data: latency } = useQuery({
+    queryKey: ['analytics', 'latency', range],
+    queryFn: () => apiFetch<any>(`/api/analytics/latency?range=${range}`),
+  })
+
+  // Prompt-cache stats live under settings (the cache is process-global, not
+  // range-scoped); polled so the panel stays live as traffic flows.
+  const { data: cache } = useQuery({
+    queryKey: ['cache'],
+    queryFn: () => apiFetch<{ enabled: boolean; stats: { hits: number; misses: number; entries: number; hitRate: number } }>('/api/settings/cache'),
+    refetchInterval: 10000,
+  })
+
+  // Live request feed — newest first, polled every 5s.
+  const { data: recent = [] } = useQuery({
+    queryKey: ['analytics', 'recent'],
+    queryFn: () => apiFetch<any[]>(`/api/analytics/recent?limit=60`),
+    refetchInterval: 5000,
+  })
+
   // Savings card shows ONE stable monthly figure regardless of the selected
   // range: the last-30-days data projected to a full month from its actual
   // span (a young install with 2 days of data shows 15x its 2-day total).
@@ -230,6 +250,104 @@ export default function AnalyticsPage() {
                           <TableCell className="text-right tabular-nums">{formatTokens(m.totalInputTokens)}</TableCell>
                           <TableCell className="text-right tabular-nums">{formatTokens(m.totalOutputTokens)}</TableCell>
                           <TableCell className="text-right tabular-nums pr-4">${(m.estimatedCost ?? 0).toFixed(2)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </Panel>
+          </div>
+
+          {/* Prompt cache */}
+          <Panel title="Prompt cache">
+            {!cache ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No data yet</p>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-display font-semibold tabular-nums text-signal">{Math.round((cache.stats.hitRate ?? 0) * 100)}%</span>
+                  <span className="text-sm text-muted-foreground">hit rate {cache.enabled ? '' : '· (disabled)'}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <Stat label="Hits" value={cache.stats.hits} />
+                  <Stat label="Misses" value={cache.stats.misses} />
+                  <Stat label="Entries" value={cache.stats.entries} />
+                </div>
+                <p className="text-xs text-muted-foreground">Each hit is a provider call avoided — saved quota and instant reply.</p>
+              </div>
+            )}
+          </Panel>
+
+          {/* Latency percentiles */}
+          <Panel title="Latency percentiles">
+            {!latency?.overall?.count ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No data yet</p>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">Total latency</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <Stat label="p50" value={`${latency.overall.latency.p50} ms`} />
+                    <Stat label="p95" value={`${latency.overall.latency.p95} ms`} />
+                    <Stat label="p99" value={`${latency.overall.latency.p99} ms`} />
+                  </div>
+                </div>
+                {latency.overall.ttfb && (
+                  <div>
+                    <p className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">Time to first byte (streaming)</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <Stat label="p50" value={`${latency.overall.ttfb.p50} ms`} />
+                      <Stat label="p95" value={`${latency.overall.ttfb.p95} ms`} />
+                      <Stat label="p99" value={`${latency.overall.ttfb.p99} ms`} />
+                    </div>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground tabular-nums">{latency.overall.count} successful requests sampled.</p>
+              </div>
+            )}
+          </Panel>
+
+          {/* Live request log */}
+          <div className="lg:col-span-2">
+            <Panel title="Live request log">
+              {recent.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No requests yet</p>
+              ) : (
+                <div className="max-h-[360px] overflow-y-auto -mx-4">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="pl-4 w-10"></TableHead>
+                        <TableHead>Model</TableHead>
+                        <TableHead className="text-right">Latency</TableHead>
+                        <TableHead className="text-right">TTFB</TableHead>
+                        <TableHead className="text-right">Tokens</TableHead>
+                        <TableHead className="pr-4 text-right">Time</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {recent.map((r: any) => (
+                        <TableRow key={r.id}>
+                          <TableCell className="pl-4">
+                            <span
+                              className={`inline-block size-2 rounded-full ${r.status === 'success' ? 'bg-signal' : 'bg-destructive'}`}
+                              title={r.status === 'error' ? (r.error ?? 'error') : 'success'}
+                            />
+                          </TableCell>
+                          <TableCell className="text-xs">
+                            <span className="font-medium">{r.modelId}</span>
+                            <span className="text-muted-foreground"> · {r.platform}</span>
+                            {r.status === 'error' && r.error && (
+                              <span className="block max-w-[280px] truncate text-[11px] text-destructive">{r.error}</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right text-xs tabular-nums">{r.latencyMs != null ? `${r.latencyMs} ms` : '—'}</TableCell>
+                          <TableCell className="text-right text-xs tabular-nums text-muted-foreground">{r.ttfbMs != null ? `${r.ttfbMs} ms` : '—'}</TableCell>
+                          <TableCell className="text-right text-xs tabular-nums text-muted-foreground">{formatTokens(r.inputTokens)}→{formatTokens(r.outputTokens)}</TableCell>
+                          <TableCell className="pr-4 text-right text-xs tabular-nums text-muted-foreground">
+                            {formatSqliteUtcToLocalTime(r.createdAt, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

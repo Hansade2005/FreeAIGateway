@@ -6,16 +6,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>
       try {
+        // Dark-first by brand: default to the hero dark theme; only an explicit
+        // 'light' choice opts out. Set before paint to avoid a flash.
         const theme = localStorage.getItem('theme')
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-        if (theme === 'dark' || (!theme && prefersDark)) {
-          document.documentElement.classList.add('dark')
-        }
+        document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark')
       } catch {
-        // Keep the initial render working if localStorage is unavailable.
+        document.documentElement.classList.add('dark')
       }
     </script>
-    <title>FreeLLMAPI · Unified LLM Router</title>
+    <meta name="description" content="FreeAIGateway — one gateway, two protocols (OpenAI & Anthropic), sixteen free LLM providers behind a single endpoint." />
+    <title>FreeAIGateway · One gateway, two protocols</title>
   </head>
   <body>
     <div id="root"></div>

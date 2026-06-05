@@ -48,6 +48,14 @@ const components: Components = {
     </blockquote>
   ),
   hr: () => <hr className="my-3 border-foreground/15" />,
+  img: ({ src, alt }) => (
+    <img
+      src={typeof src === 'string' ? src : undefined}
+      alt={alt ?? ''}
+      loading="lazy"
+      className="my-2 max-h-96 w-auto max-w-full rounded-xl border bg-surface-2 object-contain first:mt-0 last:mb-0"
+    />
+  ),
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   em: ({ children }) => <em className="italic">{children}</em>,
   del: ({ children }) => <del className="opacity-70">{children}</del>,

@@ -11,8 +11,63 @@ import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString, messageHasImage, normalizeOutboundContent } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
+import { getCacheConfig, buildCacheKey, getCached, setCached, type CachedCompletion } from '../services/cache.js';
+import { getBuiltinToolsConfig, getEnabledBuiltinToolDefs, isBuiltinTool, executeBuiltinTool } from '../services/builtin-tools.js';
+import type { BaseProvider, CompletionOptions } from '../providers/base.js';
+import type { ChatCompletionResponse, ChatToolDefinition } from '@freellmapi/shared/types.js';
+
+// Agent loop for gateway-executed built-in tools (web_search/web_extract/
+// generate_image). When the model answers with ONLY built-in tool calls, run
+// them server-side, feed the results back, and re-ask — up to a small cap — so
+// the client gets a finished answer. If the model calls a CLIENT tool (or mixes
+// in one), we stop and hand the turn back so the client's own tool loop runs.
+const MAX_BUILTIN_TOOL_ITERS = 5;
+async function resolveBuiltinToolCalls(
+  provider: BaseProvider,
+  apiKey: string,
+  modelId: string,
+  first: ChatCompletionResponse,
+  messages: ChatMessage[],
+  opts: CompletionOptions,
+  origin: string,
+): Promise<ChatCompletionResponse> {
+  let current = first;
+  const convo: ChatMessage[] = [...messages];
+  const imageUrls: string[] = [];
+  for (let i = 0; i < MAX_BUILTIN_TOOL_ITERS; i++) {
+    const calls = current.choices?.[0]?.message?.tool_calls ?? [];
+    if (calls.length === 0) break;
+    if (!calls.every((c) => isBuiltinTool(c.function.name))) break; // client tool present
+    convo.push(current.choices[0].message);
+    for (const c of calls) {
+      const result = await executeBuiltinTool(c.function.name, c.function.arguments);
+      convo.push({ role: 'tool', tool_call_id: c.id, content: result.content });
+      // A generated PNG is served by GET /v1/images/files/:name (same temp dir).
+      if (result.imageFile) imageUrls.push(`${origin}/v1/images/files/${result.imageFile}`);
+    }
+    current = await provider.chatCompletion(apiKey, convo, modelId, opts);
+  }
+  // Surface generated images inline: append them as markdown to the final
+  // answer so any markdown-rendering client (e.g. the Playground) shows them.
+  if (imageUrls.length) {
+    const msg = current.choices?.[0]?.message;
+    if (msg) {
+      const base = contentToString(msg.content ?? '');
+      const imgs = imageUrls.map((u) => `![generated image](${u})`).join('\n\n');
+      msg.content = base ? `${base}\n\n${imgs}` : imgs;
+    }
+  }
+  return current;
+}
 
 export const proxyRouter = Router();
+
+// A request opts out of the cache with `x-cache: no-store` (or a no-store/
+// no-cache Cache-Control). Used by callers that need a fresh generation.
+function cacheOptedOut(req: Request): boolean {
+  const header = String(req.headers['x-cache'] ?? req.headers['cache-control'] ?? '');
+  return /no-store|no-cache/i.test(header);
+}
 
 // Virtual "auto" model. Clients like Hermes require a non-empty `model` field
 // on every request, but freellmapi's whole point is to pick the model itself.
@@ -411,6 +466,26 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   const tool_choice = parsed.data.tool_choice === 'any' ? 'required' as const : parsed.data.tool_choice;
   const tools = parsed.data.tools?.map(t => ({ ...t, type: 'function' as const }));
 
+  // Built-in (gateway-executed) tools. Injected only on the non-streaming path,
+  // only when a tool-capable model is enabled (so plain chat isn't forced onto
+  // a narrower pool when none exists), and only if the caller didn't opt out
+  // (`x-builtin-tools: off`). Merged with any client tools; the agent loop in
+  // the non-stream branch resolves them. Default-on, toggleable in Settings.
+  const builtinCfg = getBuiltinToolsConfig();
+  const builtinOptOut = String(req.headers['x-builtin-tools'] ?? '').toLowerCase() === 'off';
+  // Built-ins augment only the gateway's signature AUTO-routed path: no explicit
+  // model pin (honor an exact model choice verbatim), no client tools (an agent
+  // client keeps full control of its own toolset), non-streaming, not opted out,
+  // and only when a tool-capable model actually exists to run them.
+  const clientSentTools = (tools?.length ?? 0) > 0;
+  const autoRouted = !requestedModel || isAutoModel(requestedModel);
+  // Non-streaming only: the agent loop makes several upstream calls, which can't
+  // run over a live token stream. Clients that want the tools send stream:false
+  // (the Playground does this automatically when built-ins are active).
+  const useBuiltinTools = !stream && builtinCfg.enabled && !builtinOptOut && !clientSentTools && autoRouted && hasEnabledToolsModel();
+  const builtinToolDefs: ChatToolDefinition[] = useBuiltinTools ? getEnabledBuiltinToolDefs(builtinCfg) : [];
+  const effectiveTools = builtinToolDefs.length ? [...(tools ?? []), ...builtinToolDefs] : tools;
+
   // Pairing state for id-less tool calls (#200): every tool_call id (given or
   // synthesized) queues up here; a tool message without a tool_call_id takes
   // the oldest unanswered one, which matches the single-call-per-turn flow
@@ -499,6 +574,40 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     return sum + Math.ceil(text.length / 4);
   }, 0);
 
+  // Prompt cache (opt-in): an identical request returns the stored completion
+  // without routing to any provider — saving a free-tier call and answering
+  // instantly. The key covers the answer-affecting request shape; routing
+  // internals are excluded so a repeat hits regardless of current provider
+  // health. Streaming hits replay the cached completion as a single SSE frame.
+  const cacheCfg = getCacheConfig();
+  const cacheKey = cacheCfg.enabled && !cacheOptedOut(req)
+    ? buildCacheKey({ endpoint: 'chat', model: requestedModel, messages, tools: effectiveTools, tool_choice, temperature, top_p, max_tokens })
+    : null;
+  if (cacheKey) {
+    const hit = getCached(cacheKey);
+    if (hit) {
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('X-Routed-Via', `${hit.platform}/${hit.modelId}`);
+      logRequest(hit.platform, hit.modelId, 0, 'success', hit.response.usage?.prompt_tokens ?? 0, hit.response.usage?.completion_tokens ?? 0, Date.now() - start, null);
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const msg = hit.response.choices?.[0]?.message;
+        const chunk = {
+          id: hit.response.id, object: 'chat.completion.chunk', created: hit.response.created, model: hit.response.model,
+          choices: [{ index: 0, delta: { role: 'assistant', content: contentToString(msg?.content ?? ''), ...(msg?.tool_calls ? { tool_calls: msg.tool_calls } : {}) }, finish_reason: 'stop' }],
+        };
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else {
+        res.json(hit.response);
+      }
+      return;
+    }
+  }
+
   // Image requests must route to a vision-capable model. Reject up front with a
   // clear message when none is enabled, rather than silently dropping the image
   // or surfacing the generic "all models exhausted" error (#118, #125). Add a
@@ -525,7 +634,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
   // call into its text answer — the request "succeeds" but the client's tool
   // loop sees nothing, which is strictly worse than an error. Same up-front
   // gate pattern as vision above.
-  const wantsTools = (tools?.length ?? 0) > 0;
+  const wantsTools = (effectiveTools?.length ?? 0) > 0;
   if (wantsTools && !hasEnabledToolsModel()) {
     res.status(422).json({
       error: {
@@ -602,10 +711,15 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         let totalOutputTokens = 0;
         let streamStarted = false;
         let ttfbMs: number | null = null;
+        // Accumulate the assistant text so a successful stream can populate the
+        // prompt cache. Tool-call streams aren't cached (reassembling structured
+        // calls from index-based deltas is error-prone) — sawToolCalls skips it.
+        let cachedText = '';
+        let sawToolCalls = false;
         try {
           const gen = route.provider.streamChatCompletion(
             route.apiKey, messages, route.modelId,
-            { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
+            { temperature, max_tokens, top_p, tools: effectiveTools, tool_choice, parallel_tool_calls },
           );
 
           for await (const chunk of gen) {
@@ -617,6 +731,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
               res.setHeader('Cache-Control', 'no-cache');
               res.setHeader('Connection', 'keep-alive');
               res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+              if (cacheKey) res.setHeader('X-Cache', 'MISS');
               if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
               streamStarted = true;
             }
@@ -625,6 +740,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             normalizeOutboundContent(chunk);
             const text = streamChunkText(chunk);
             totalOutputTokens += Math.ceil(text.length / 4);
+            cachedText += text;
+            if ((chunk.choices?.[0]?.delta?.tool_calls?.length ?? 0) > 0) sawToolCalls = true;
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
 
@@ -647,6 +764,18 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
           recordSuccess(route.modelDbId);
           setStickyModel(messages, route.modelDbId);
+          // Populate the cache from a clean text stream (no tool calls).
+          if (cacheKey && !sawToolCalls && cachedText) {
+            const synthesized: CachedCompletion = {
+              response: {
+                id: `chatcmpl-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: route.modelId,
+                choices: [{ index: 0, message: { role: 'assistant', content: cachedText }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: estimatedInputTokens, completion_tokens: totalOutputTokens, total_tokens: estimatedInputTokens + totalOutputTokens },
+              },
+              platform: route.platform, modelId: route.modelId, storedAt: Date.now(),
+            };
+            setCached(cacheKey, synthesized, cacheCfg.ttlSeconds);
+          }
           logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null, ttfbMs);
           return;
         } catch (streamErr: any) {
@@ -666,10 +795,15 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           throw streamErr;
         }
       } else {
-        const result = await route.provider.chatCompletion(
-          route.apiKey, messages, route.modelId,
-          { temperature, max_tokens, top_p, tools, tool_choice, parallel_tool_calls },
-        );
+        const completionOpts = { temperature, max_tokens, top_p, tools: effectiveTools, tool_choice, parallel_tool_calls };
+        let result = await route.provider.chatCompletion(route.apiKey, messages, route.modelId, completionOpts);
+
+        // Built-in tool agent loop: resolve any gateway-executed tool calls
+        // server-side before returning, so the client gets a finished answer.
+        if (builtinToolDefs.length) {
+          const origin = `${req.protocol}://${req.get('host')}`;
+          result = await resolveBuiltinToolCalls(route.provider, route.apiKey, route.modelId, result, messages, completionOpts, origin);
+        }
 
         // Empty completion (no text, no tool calls) → fail over rather than
         // return a transport-level "success" the caller can't act on. Mirrors
@@ -691,6 +825,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         setStickyModel(messages, route.modelDbId);
 
         res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+        if (cacheKey) res.setHeader('X-Cache', 'MISS');
         if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
         // Repair double-encoded tool arguments against the request's tool
         // schemas (e.g. GLM emitting an array parameter as a JSON string),
@@ -705,7 +840,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           }
         }
         // Normalize array-shaped message.content to a string on the way out (#166).
-        res.json(normalizeOutboundContent(result));
+        const normalized = normalizeOutboundContent(result);
+        // Cache the completed answer (tool calls included — they're already
+        // fully formed here, unlike the streamed path).
+        if (cacheKey) {
+          setCached(cacheKey, { response: normalized, platform: route.platform, modelId: route.modelId, storedAt: Date.now() }, cacheCfg.ttlSeconds);
+        }
+        res.json(normalized);
 
         logRequest(
           route.platform, route.modelId, route.keyId, 'success',
