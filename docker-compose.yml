@@ -1,6 +1,6 @@
 services:
-  freellmapi:
-    image: ghcr.io/tashfeenahmed/freellmapi:latest
+  freeaigateway:
+    image: ghcr.io/hansade2005/freeaigateway:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -9,12 +9,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-    # Bound to localhost by default — FreeLLMAPI is single-user and must not be
+    # Bound to localhost by default — FreeAIGateway is single-user and must not be
     # exposed to the internet. Set HOST_BIND=0.0.0.0 to reach it from your LAN.
     ports:
       - "${HOST_BIND:-127.0.0.1}:${PORT:-3001}:3001"
     volumes:
-      - freellmapi-data:/app/server/data
+      - freeaigateway-data:/app/server/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -30,4 +30,4 @@ services:
       retries: 3
 
 volumes:
-  freellmapi-data:
+  freeaigateway-data:

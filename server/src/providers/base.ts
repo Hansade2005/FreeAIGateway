@@ -5,7 +5,7 @@ import type {
   ChatToolDefinition,
   ChatToolChoice,
   Platform,
-} from '@freellmapi/shared/types.js';
+} from '@freeaigateway/shared/types.js';
 
 export interface CompletionOptions {
   model?: string;

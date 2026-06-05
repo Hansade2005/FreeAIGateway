@@ -230,7 +230,7 @@ The included `docker-compose.yml` is the recommended install path:
 
 ```bash
 docker compose up -d
-docker compose logs -f freellmapi
+docker compose logs -f freeaigateway
 ```
 
 By default the container's port binds to `127.0.0.1` (localhost only). To reach the dashboard/API from another machine, publish on all interfaces with `HOST_BIND=0.0.0.0 docker compose up -d` — only on a trusted LAN, since the proxy is single-user.

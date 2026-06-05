@@ -1,5 +1,5 @@
 {
-  "name": "@freellmapi/server",
+  "name": "@freeaigateway/server",
   "version": "0.2.1",
   "private": true,
   "type": "module",
@@ -11,7 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@freellmapi/shared": "*",
+    "@freeaigateway/shared": "*",
     "better-sqlite3": "^12.10.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",

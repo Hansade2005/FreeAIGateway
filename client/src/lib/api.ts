@@ -13,7 +13,7 @@ export function clearToken(): void {
   try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
 }
 
-export const UNAUTHORIZED_EVENT = 'freellmapi:unauthorized';
+export const UNAUTHORIZED_EVENT = 'freeaigateway:unauthorized';
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();

@@ -8,7 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 // many requests a single client IP can make per minute and returns a standard
 // OpenAI-shaped 429 once the cap is exceeded.
 //
-// FreeLLMAPI is a single-user tool, so the default ceiling is generous. Tune it
+// FreeAIGateway is a single-user tool, so the default ceiling is generous. Tune it
 // with PROXY_RATE_LIMIT_RPM (requests per minute per IP); set it to 0 to turn
 // rate limiting off entirely.
 

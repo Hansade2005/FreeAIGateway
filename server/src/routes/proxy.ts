@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import type { ChatMessage, ModelListRow } from '@freellmapi/shared/types.js';
+import type { ChatMessage, ModelListRow } from '@freeaigateway/shared/types.js';
 import { routeRequest, recordRateLimitHit, recordSuccess, hasEnabledVisionModel, hasEnabledToolsModel, type RouteResult } from '../services/router.js';
 import { recordRequest, recordTokens, setCooldown, getCooldownDurationForLimit, PAYMENT_REQUIRED_COOLDOWN_MS } from '../services/ratelimit.js';
 import { pruneRequestAnalytics } from '../services/request-retention.js';
@@ -14,7 +14,7 @@ import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
 import { getCacheConfig, buildCacheKey, getCached, setCached, type CachedCompletion } from '../services/cache.js';
 import { getBuiltinToolsConfig, getEnabledBuiltinToolDefs, isBuiltinTool, executeBuiltinTool } from '../services/builtin-tools.js';
 import type { BaseProvider, CompletionOptions } from '../providers/base.js';
-import type { ChatCompletionResponse, ChatToolDefinition } from '@freellmapi/shared/types.js';
+import type { ChatCompletionResponse, ChatToolDefinition } from '@freeaigateway/shared/types.js';
 
 // Agent loop for gateway-executed built-in tools (web_search/web_extract/
 // generate_image). When the model answers with ONLY built-in tool calls, run
@@ -70,7 +70,7 @@ function cacheOptedOut(req: Request): boolean {
 }
 
 // Virtual "auto" model. Clients like Hermes require a non-empty `model` field
-// on every request, but freellmapi's whole point is to pick the model itself.
+// on every request, but FreeAIGateway's whole point is to pick the model itself.
 // Requesting this id means "let the router decide" — identical to omitting
 // `model` entirely.
 const AUTO_MODEL_ID = 'auto';
@@ -189,7 +189,7 @@ proxyRouter.get('/models', (req: Request, res: Response) => {
         id: AUTO_MODEL_ID,
         object: 'model',
         created: 0,
-        owned_by: 'freellmapi',
+        owned_by: 'freeaigateway',
         name: 'Auto (router picks the best available model)',
         context_window: null,
       },
