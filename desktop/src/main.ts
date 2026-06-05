@@ -13,8 +13,8 @@ const DEFAULT_PORT = 31415;
 // Lean posture: one instance, menu-bar only. GPU stays ON — vibrancy
 // (the popover/dashboard glass) needs GPU compositing; with hardware
 // acceleration disabled, transparent windows render an opaque white.
-app.setName('FreeLLMAPI');
-app.setPath('userData', path.join(app.getPath('appData'), 'FreeLLMAPI'));
+app.setName('FreeAIGateway');
+app.setPath('userData', path.join(app.getPath('appData'), 'FreeAIGateway'));
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -92,7 +92,7 @@ if (!app.requestSingleInstanceLock()) {
       saveConfig({ ...cfg, port });
       sessionToken = ensureSessionToken();
       const tray = buildTray(port, sessionToken);
-      console.log(`[desktop] FreeLLMAPI running on http://127.0.0.1:${port}`);
+      console.log(`[desktop] FreeAIGateway running on http://127.0.0.1:${port}`);
 
       // Dev-only UI verification: FREEAPI_SHOT=1 opens the popover and the
       // dashboard, captures both to /tmp, and quits. FREEAPI_SHOT=hold opens
@@ -135,7 +135,7 @@ if (!app.requestSingleInstanceLock()) {
       }
     } catch (err: any) {
       dialog.showErrorBox(
-        'FreeLLMAPI failed to start',
+        'FreeAIGateway failed to start',
         err?.message ?? String(err),
       );
       app.quit();

@@ -26,7 +26,7 @@ export function openDashboard(port: number, token: string): void {
     height: 800,
     minWidth: 720,
     minHeight: 480,
-    title: 'FreeLLMAPI',
+    title: 'FreeAIGateway',
     // Native feel: traffic lights float over the app's own header (the client
     // adds a drag region + left padding when it detects the desktop shell),
     // and the window carries a sidebar vibrancy — the strong, Finder-style

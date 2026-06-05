@@ -97,11 +97,10 @@ Plus a **custom** provider — point at any OpenAI-compatible endpoint (llama.cp
 
 The scope is deliberately narrow. If a feature isn't on this list and isn't below, assume it isn't there yet.
 
-- **Image generation** (`/v1/images/*`)
 - **Audio / speech** (`/v1/audio/*`)
 - **Legacy completions** (`/v1/completions`) — only the chat endpoint is implemented
 - **Moderation** (`/v1/moderations`)
-- **`n > 1`** (multiple completions per request)
+- **`n > 1` for chat** (multiple completions per request) — supported on `/v1/images/generations`, not on chat
 - **Per-user billing / multi-tenant auth** — single-user by design
 
 PRs that add any of these are very welcome. See [Contributing](#contributing).
@@ -114,7 +113,7 @@ PRs that add any of these are very welcome. See [Contributing](#contributing).
 
 ```bash
 git clone https://github.com/Hansade2005/FreeAIGateway.git
-cd freellmapi
+cd FreeAIGateway
 
 # Generate an encryption key for at-rest key storage
 ENCRYPTION_KEY="$(openssl rand -hex 32)"
@@ -139,7 +138,7 @@ Open http://localhost:3001, add your provider keys on the **Keys** page, reorder
 
 ```bash
 git clone https://github.com/Hansade2005/FreeAIGateway.git
-cd freellmapi
+cd FreeAIGateway
 npm install
 cp .env.example .env
 ENCRYPTION_KEY="$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))')"

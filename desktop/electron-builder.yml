@@ -1,5 +1,5 @@
-appId: com.freellmapi.desktop
-productName: FreeLLMAPI
+appId: com.freeaigateway.desktop
+productName: FreeAIGateway
 directories:
   output: dist-electron
 files:
