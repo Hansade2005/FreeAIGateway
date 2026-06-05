@@ -4,7 +4,7 @@ import type {
   ChatCompletionChunk,
   Platform,
 } from '@freeaigateway/shared/types.js';
-import { BaseProvider, type CompletionOptions } from './base.js';
+import { BaseProvider, ANON_KEY_SENTINEL, type CompletionOptions } from './base.js';
 
 /**
  * Generic provider for platforms that use an OpenAI-compatible API.
@@ -29,6 +29,7 @@ export class OpenAICompatProvider extends BaseProvider {
     validateUrl?: string;
     timeoutMs?: number;
     keyless?: boolean;
+    optionalKey?: boolean;
   }) {
     super();
     this.platform = opts.platform;
@@ -38,13 +39,19 @@ export class OpenAICompatProvider extends BaseProvider {
     this.validateUrl = opts.validateUrl;
     this.timeoutMs = opts.timeoutMs ?? 15000;
     this.keyless = opts.keyless ?? false;
+    this.optionalKey = opts.optionalKey ?? false;
   }
 
-  /** Keyless providers (Kilo's anonymous free tier) must send NO Authorization
-   * header — a stored sentinel like `Bearer no-key` could be treated as an
-   * invalid key. Everyone else sends the bearer as usual. */
+  /** Decide the Authorization header:
+   *  - keyless providers always omit it;
+   *  - optional-key providers (Kilo) omit it in anonymous mode (no key / the
+   *    anon sentinel) but send the bearer when a real key is configured;
+   *  - everyone else sends the bearer as usual. A stored sentinel like
+   *    `Bearer no-key` would otherwise be treated as an invalid key. */
   private authHeader(apiKey: string): Record<string, string> {
-    return this.keyless ? {} : { 'Authorization': `Bearer ${apiKey}` };
+    if (this.keyless) return {};
+    if (this.optionalKey && (!apiKey || apiKey === ANON_KEY_SENTINEL)) return {};
+    return { 'Authorization': `Bearer ${apiKey}` };
   }
 
   async chatCompletion(
