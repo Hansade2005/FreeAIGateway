@@ -411,12 +411,17 @@ function ChatConsole() {
                 <Button
                   type="button"
                   variant={agentTools ? 'default' : 'outline'}
-                  size="icon"
-                  className={agentTools ? 'bg-signal text-signal-foreground hover:bg-signal/90' : ''}
+                  size="sm"
+                  className={`gap-1.5 ${agentTools ? 'bg-signal text-signal-foreground hover:bg-signal/90' : 'text-muted-foreground'}`}
                   onClick={() => setAgentTools((v) => !v)}
+                  aria-pressed={agentTools}
                   title="Agent tools: let the gateway run web search / extract / image generation (non-streaming)"
                 >
-                  <Sparkles className="size-4" />
+                  <Sparkles className="size-3.5" />
+                  Agent tools
+                  <span className={`ml-0.5 rounded px-1 py-px text-[9px] font-semibold uppercase tracking-wide ${agentTools ? 'bg-signal-foreground/20' : 'bg-muted text-muted-foreground'}`}>
+                    {agentTools ? 'On' : 'Off'}
+                  </span>
                 </Button>
               )}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickImage} />
