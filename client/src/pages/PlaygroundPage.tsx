@@ -88,6 +88,7 @@ function ChatConsole() {
   const [toolsOn, setToolsOn] = useState(false)
   const [toolsJson, setToolsJson] = useState(DEFAULT_TOOLS)
   const [toolsEditorOpen, setToolsEditorOpen] = useState(false)
+  const [agentTools, setAgentTools] = useState(false)
   const [image, setImage] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -108,10 +109,12 @@ function ChatConsole() {
   const availableModels = fallbackEntries.filter((e) => e.keyCount > 0 && e.enabled)
 
   // Gateway built-in tools (web search / extract / image gen) only run on the
-  // OpenAI auto-routed, non-streaming path. When they're active we drop
-  // streaming so the model can call them and we get the finished answer —
-  // generated images arrive as inline markdown and render in the transcript.
-  const builtinActive = !!toolsCfg?.enabled && model === 'auto' && protocol === 'openai'
+  // OpenAI auto-routed, non-streaming path. They're an explicit opt-in (the
+  // Agent-tools toggle) rather than the default, so plain chat keeps streaming
+  // token-by-token. When on, the request goes non-streaming so the model can
+  // call them and generated images arrive as inline markdown in the transcript.
+  const builtinEligible = !!toolsCfg?.enabled && model === 'auto' && protocol === 'openai'
+  const builtinActive = builtinEligible && agentTools
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, loading])
 
@@ -404,6 +407,18 @@ function ChatConsole() {
               <Button type="button" variant="outline" size="icon" onClick={() => fileRef.current?.click()} title="Attach image">
                 <ImagePlus className="size-4" />
               </Button>
+              {builtinEligible && (
+                <Button
+                  type="button"
+                  variant={agentTools ? 'default' : 'outline'}
+                  size="icon"
+                  className={agentTools ? 'bg-signal text-signal-foreground hover:bg-signal/90' : ''}
+                  onClick={() => setAgentTools((v) => !v)}
+                  title="Agent tools: let the gateway run web search / extract / image generation (non-streaming)"
+                >
+                  <Sparkles className="size-4" />
+                </Button>
+              )}
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickImage} />
             </div>
             <textarea
