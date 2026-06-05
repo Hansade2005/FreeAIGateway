@@ -11,8 +11,16 @@ import { getDb, getUnifiedApiKey } from '../db/index.js';
 import { contentToString, messageHasImage, normalizeOutboundContent } from '../lib/content.js';
 import { repairToolArguments, toolSchemaMap } from '../lib/tool-args.js';
 import { sanitizeProviderErrorMessage } from '../lib/error-redaction.js';
+import { getCacheConfig, buildCacheKey, getCached, setCached, type CachedCompletion } from '../services/cache.js';
 
 export const proxyRouter = Router();
+
+// A request opts out of the cache with `x-cache: no-store` (or a no-store/
+// no-cache Cache-Control). Used by callers that need a fresh generation.
+function cacheOptedOut(req: Request): boolean {
+  const header = String(req.headers['x-cache'] ?? req.headers['cache-control'] ?? '');
+  return /no-store|no-cache/i.test(header);
+}
 
 // Virtual "auto" model. Clients like Hermes require a non-empty `model` field
 // on every request, but freellmapi's whole point is to pick the model itself.
@@ -499,6 +507,40 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
     return sum + Math.ceil(text.length / 4);
   }, 0);
 
+  // Prompt cache (opt-in): an identical request returns the stored completion
+  // without routing to any provider — saving a free-tier call and answering
+  // instantly. The key covers the answer-affecting request shape; routing
+  // internals are excluded so a repeat hits regardless of current provider
+  // health. Streaming hits replay the cached completion as a single SSE frame.
+  const cacheCfg = getCacheConfig();
+  const cacheKey = cacheCfg.enabled && !cacheOptedOut(req)
+    ? buildCacheKey({ endpoint: 'chat', model: requestedModel, messages, tools, tool_choice, temperature, top_p, max_tokens })
+    : null;
+  if (cacheKey) {
+    const hit = getCached(cacheKey);
+    if (hit) {
+      res.setHeader('X-Cache', 'HIT');
+      res.setHeader('X-Routed-Via', `${hit.platform}/${hit.modelId}`);
+      logRequest(hit.platform, hit.modelId, 0, 'success', hit.response.usage?.prompt_tokens ?? 0, hit.response.usage?.completion_tokens ?? 0, Date.now() - start, null);
+      if (stream) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const msg = hit.response.choices?.[0]?.message;
+        const chunk = {
+          id: hit.response.id, object: 'chat.completion.chunk', created: hit.response.created, model: hit.response.model,
+          choices: [{ index: 0, delta: { role: 'assistant', content: contentToString(msg?.content ?? ''), ...(msg?.tool_calls ? { tool_calls: msg.tool_calls } : {}) }, finish_reason: 'stop' }],
+        };
+        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else {
+        res.json(hit.response);
+      }
+      return;
+    }
+  }
+
   // Image requests must route to a vision-capable model. Reject up front with a
   // clear message when none is enabled, rather than silently dropping the image
   // or surfacing the generic "all models exhausted" error (#118, #125). Add a
@@ -602,6 +644,11 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         let totalOutputTokens = 0;
         let streamStarted = false;
         let ttfbMs: number | null = null;
+        // Accumulate the assistant text so a successful stream can populate the
+        // prompt cache. Tool-call streams aren't cached (reassembling structured
+        // calls from index-based deltas is error-prone) — sawToolCalls skips it.
+        let cachedText = '';
+        let sawToolCalls = false;
         try {
           const gen = route.provider.streamChatCompletion(
             route.apiKey, messages, route.modelId,
@@ -617,6 +664,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
               res.setHeader('Cache-Control', 'no-cache');
               res.setHeader('Connection', 'keep-alive');
               res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+              if (cacheKey) res.setHeader('X-Cache', 'MISS');
               if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
               streamStarted = true;
             }
@@ -625,6 +673,8 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
             normalizeOutboundContent(chunk);
             const text = streamChunkText(chunk);
             totalOutputTokens += Math.ceil(text.length / 4);
+            cachedText += text;
+            if ((chunk.choices?.[0]?.delta?.tool_calls?.length ?? 0) > 0) sawToolCalls = true;
             res.write(`data: ${JSON.stringify(chunk)}\n\n`);
           }
 
@@ -647,6 +697,18 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           recordTokens(route.platform, route.modelId, route.keyId, estimatedInputTokens + totalOutputTokens);
           recordSuccess(route.modelDbId);
           setStickyModel(messages, route.modelDbId);
+          // Populate the cache from a clean text stream (no tool calls).
+          if (cacheKey && !sawToolCalls && cachedText) {
+            const synthesized: CachedCompletion = {
+              response: {
+                id: `chatcmpl-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: route.modelId,
+                choices: [{ index: 0, message: { role: 'assistant', content: cachedText }, finish_reason: 'stop' }],
+                usage: { prompt_tokens: estimatedInputTokens, completion_tokens: totalOutputTokens, total_tokens: estimatedInputTokens + totalOutputTokens },
+              },
+              platform: route.platform, modelId: route.modelId, storedAt: Date.now(),
+            };
+            setCached(cacheKey, synthesized, cacheCfg.ttlSeconds);
+          }
           logRequest(route.platform, route.modelId, route.keyId, 'success', estimatedInputTokens, totalOutputTokens, Date.now() - start, null, ttfbMs);
           return;
         } catch (streamErr: any) {
@@ -691,6 +753,7 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
         setStickyModel(messages, route.modelDbId);
 
         res.setHeader('X-Routed-Via', `${route.platform}/${route.modelId}`);
+        if (cacheKey) res.setHeader('X-Cache', 'MISS');
         if (attempt > 0) res.setHeader('X-Fallback-Attempts', String(attempt));
         // Repair double-encoded tool arguments against the request's tool
         // schemas (e.g. GLM emitting an array parameter as a JSON string),
@@ -705,7 +768,13 @@ proxyRouter.post('/chat/completions', async (req: Request, res: Response) => {
           }
         }
         // Normalize array-shaped message.content to a string on the way out (#166).
-        res.json(normalizeOutboundContent(result));
+        const normalized = normalizeOutboundContent(result);
+        // Cache the completed answer (tool calls included — they're already
+        // fully formed here, unlike the streamed path).
+        if (cacheKey) {
+          setCached(cacheKey, { response: normalized, platform: route.platform, modelId: route.modelId, storedAt: Date.now() }, cacheCfg.ttlSeconds);
+        }
+        res.json(normalized);
 
         logRequest(
           route.platform, route.modelId, route.keyId, 'success',

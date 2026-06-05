@@ -1,11 +1,108 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Copy, Check, Eye, EyeOff, RefreshCw, KeyRound, Plug, ShieldAlert } from 'lucide-react'
+import { Copy, Check, Eye, EyeOff, RefreshCw, KeyRound, Plug, ShieldAlert, Zap, Trash2 } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import { apiFetch } from '@/lib/api'
+
+interface CacheState {
+  enabled: boolean
+  ttlSeconds: number
+  stats: { hits: number; misses: number; stores: number; entries: number; hitRate: number }
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border bg-surface-2/50 px-3 py-2.5">
+      <div className="font-mono text-lg font-semibold tabular-nums">{value}</div>
+      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    </div>
+  )
+}
+
+function CacheCard() {
+  const queryClient = useQueryClient()
+  const { data } = useQuery<CacheState>({
+    queryKey: ['cache'],
+    queryFn: () => apiFetch('/api/settings/cache'),
+    refetchInterval: 10000,
+  })
+  const [ttl, setTtl] = useState('')
+  useEffect(() => { if (data && ttl === '') setTtl(String(data.ttlSeconds)) }, [data, ttl])
+
+  const patch = useMutation({
+    mutationFn: (body: { enabled?: boolean; ttlSeconds?: number }) =>
+      apiFetch<CacheState>('/api/settings/cache', { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: (res) => queryClient.setQueryData(['cache'], res),
+  })
+  const clear = useMutation({
+    mutationFn: () => apiFetch<CacheState>('/api/settings/cache/clear', { method: 'POST' }),
+    onSuccess: (res) => queryClient.setQueryData(['cache'], res),
+  })
+
+  const enabled = data?.enabled ?? false
+  const stats = data?.stats
+  const ttlChanged = data && ttl !== '' && Number(ttl) !== data.ttlSeconds && Number(ttl) > 0
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-signal-muted text-signal">
+              <Zap className="size-4" />
+            </span>
+            <div>
+              <CardTitle>Prompt cache</CardTitle>
+              <CardDescription>Serve identical requests from memory — no provider call, instant reply, free-tier saved.</CardDescription>
+            </div>
+          </div>
+          <Switch checked={enabled} onCheckedChange={(v: boolean) => patch.mutate({ enabled: v })} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">TTL (seconds)</label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                value={ttl}
+                onChange={(e) => setTtl(e.target.value)}
+                className="h-9 w-32 font-mono"
+                disabled={!enabled}
+              />
+              {ttlChanged && (
+                <Button size="sm" variant="outline" onClick={() => patch.mutate({ ttlSeconds: Number(ttl) })} disabled={patch.isPending}>
+                  Save
+                </Button>
+              )}
+            </div>
+          </div>
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => clear.mutate()} disabled={clear.isPending || !stats?.entries}>
+            <Trash2 className="size-3.5" /> Flush {stats?.entries ? `(${stats.entries})` : ''}
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat label="Hit rate" value={stats ? `${Math.round(stats.hitRate * 100)}%` : '—'} />
+          <Stat label="Hits" value={stats ? String(stats.hits) : '—'} />
+          <Stat label="Misses" value={stats ? String(stats.misses) : '—'} />
+          <Stat label="Entries" value={stats ? String(stats.entries) : '—'} />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Keyed on the full request shape. Send <code className="font-mono">x-cache: no-store</code> on a request to bypass.
+          Streamed answers with tool calls aren't cached.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
 
 function useCopy() {
   const [copied, setCopied] = useState<string | null>(null)
@@ -116,6 +213,9 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Prompt cache */}
+        <CacheCard />
 
         {/* OpenAI-compatible endpoint */}
         <Card>
