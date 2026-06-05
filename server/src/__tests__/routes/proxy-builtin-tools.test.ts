@@ -128,6 +128,55 @@ describe('built-in tool agent loop on /v1/chat/completions', () => {
     expect(content).toMatch(/!\[generated image\]\(http:\/\/[^)]+\/v1\/images\/files\/img-\d+-[0-9a-f]+\.png\)/)
   })
 
+  it('forces a final text answer if a model keeps calling tools past the cap', async () => {
+    // A stubborn model that ALWAYS asks for the tool — until tools are dropped.
+    const provider: any = {
+      calls: 0,
+      async chatCompletion(_k: string, _m: any[], _id: string, opts: any) {
+        provider.calls++
+        if (opts && opts.tools === undefined) {
+          return { id: 'c', object: 'chat.completion', created: 0, model: 'fake-model', choices: [{ index: 0, message: { role: 'assistant', content: 'Final: it is sunny.' }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }
+        }
+        return { id: 'c', object: 'chat.completion', created: 0, model: 'fake-model', choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ id: 't', type: 'function', function: { name: 'web_search', arguments: '{"query":"x"}' } }] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }
+      },
+      async *streamChatCompletion() {},
+    }
+    mockRouteRequest.mockReturnValue(fakeRoute(provider))
+    const { status, body } = await post(app, { messages: [{ role: 'user', content: 'weather?' }] }, key)
+    expect(status).toBe(200)
+    // Client never receives an unexecutable built-in tool call.
+    expect(body.choices[0].message.tool_calls).toBeFalsy()
+    expect(body.choices[0].message.content).toBe('Final: it is sunny.')
+    // 1 initial + 5 capped loop iterations + 1 forced tools-less synthesis.
+    expect(provider.calls).toBe(7)
+  })
+
+  it('synthesizes a tool-call that arrives without an id (paired correctly)', async () => {
+    const provider: any = {
+      calls: 0,
+      lastConvo: null as any,
+      async chatCompletion(_k: string, messages: any[]) {
+        provider.calls++
+        provider.lastConvo = messages
+        if (provider.calls === 1) {
+          // No `id` on the tool call — the loop must synthesize one.
+          return { id: 'c', object: 'chat.completion', created: 0, model: 'fake-model', choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: [{ type: 'function', function: { name: 'web_search', arguments: '{"query":"x"}' } }] }, finish_reason: 'tool_calls' }], usage: {} }
+        }
+        return { id: 'c', object: 'chat.completion', created: 0, model: 'fake-model', choices: [{ index: 0, message: { role: 'assistant', content: 'answer' }, finish_reason: 'stop' }], usage: {} }
+      },
+      async *streamChatCompletion() {},
+    }
+    mockRouteRequest.mockReturnValue(fakeRoute(provider))
+    const { status, body } = await post(app, { messages: [{ role: 'user', content: 'hi' }] }, key)
+    expect(status).toBe(200)
+    expect(body.choices[0].message.content).toBe('answer')
+    // The assistant tool_call and its tool result share a synthesized id.
+    const toolMsg = provider.lastConvo.find((m: any) => m.role === 'tool')
+    const asstMsg = provider.lastConvo.find((m: any) => m.role === 'assistant' && m.tool_calls)
+    expect(toolMsg.tool_call_id).toBeTruthy()
+    expect(toolMsg.tool_call_id).toBe(asstMsg.tool_calls[0].id)
+  })
+
   it('leaves streaming requests untouched (built-ins are non-stream only)', async () => {
     const provider: any = {
       streamed: false,

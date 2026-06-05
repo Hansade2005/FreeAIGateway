@@ -34,18 +34,33 @@ async function resolveBuiltinToolCalls(
   let current = first;
   const convo: ChatMessage[] = [...messages];
   const imageUrls: string[] = [];
+  let executedAny = false;
+  const builtinCalls = (r: ChatCompletionResponse) =>
+    (r.choices?.[0]?.message?.tool_calls ?? []).filter((c) => isBuiltinTool(c.function?.name));
   for (let i = 0; i < MAX_BUILTIN_TOOL_ITERS; i++) {
-    const calls = current.choices?.[0]?.message?.tool_calls ?? [];
-    if (calls.length === 0) break;
-    if (!calls.every((c) => isBuiltinTool(c.function.name))) break; // client tool present
-    convo.push(current.choices[0].message);
+    const allCalls = current.choices?.[0]?.message?.tool_calls ?? [];
+    if (allCalls.length === 0) break;
+    if (!allCalls.every((c) => isBuiltinTool(c.function?.name))) break; // client tool present → hand back
+    // Pair every result with its call: synthesize an id if the model omitted
+    // one, otherwise the tool result can't be matched and the model re-asks.
+    const calls = allCalls.map((c, idx) => ({ ...c, id: c.id || `call_${i}_${idx}` }));
+    convo.push({ ...current.choices[0].message, tool_calls: calls });
     for (const c of calls) {
       const result = await executeBuiltinTool(c.function.name, c.function.arguments);
       convo.push({ role: 'tool', tool_call_id: c.id, content: result.content });
       // A generated PNG is served by GET /v1/images/files/:name (same temp dir).
       if (result.imageFile) imageUrls.push(`${origin}/v1/images/files/${result.imageFile}`);
+      executedAny = true;
     }
     current = await provider.chatCompletion(apiKey, convo, modelId, opts);
+  }
+  // Stubborn free models sometimes keep emitting tool calls past the cap. Never
+  // hand the client an unexecutable built-in tool call — make one final call
+  // with tools dropped so the model must synthesize from the results it has.
+  if (executedAny && builtinCalls(current).length > 0) {
+    try {
+      current = await provider.chatCompletion(apiKey, convo, modelId, { ...opts, tools: undefined, tool_choice: undefined });
+    } catch { /* keep the last response */ }
   }
   // Surface generated images inline: append them as markdown to the final
   // answer so any markdown-rendering client (e.g. the Playground) shows them.
