@@ -237,6 +237,7 @@ export default function SettingsPage() {
             <ul className="space-y-1 text-xs text-muted-foreground">
               <li><code className="font-mono text-foreground/80">POST /v1/chat/completions</code></li>
               <li><code className="font-mono text-foreground/80">POST /v1/responses</code> · <code className="font-mono text-foreground/80">/v1/embeddings</code></li>
+              <li><code className="font-mono text-foreground/80">POST /v1/images/generations</code></li>
               <li><code className="font-mono text-foreground/80">GET /v1/models</code></li>
             </ul>
           </CardContent>

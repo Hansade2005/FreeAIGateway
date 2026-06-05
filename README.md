@@ -75,6 +75,7 @@ Plus a **custom** provider — point at any OpenAI-compatible endpoint (llama.cp
 
 - **OpenAI-compatible** — `POST /v1/chat/completions` and `GET /v1/models` work with the official OpenAI SDKs and any OpenAI-compatible client (LangChain, LlamaIndex, Continue, Hermes, etc.). Just change `base_url`.
 - **Responses API** — `POST /v1/responses` (the wire format current Codex CLI versions require) is implemented as a translating shim over the same router, with full streaming events and tool calls.
+- **Image generation** — `POST /v1/images/generations` (OpenAI Images shape: `prompt`, `n`, `size`, `response_format`) backed by a0.dev's keyless text-to-image endpoint. `size` maps to an aspect ratio (square / 16:9 / 9:16; or pass `aspect` directly); returns `{ data: [{ url }] }` or `b64_json`. No provider key needed — rides the unified key.
 - **Prompt cache** — opt-in in-memory TTL cache (Settings → Prompt cache). An identical request returns the stored completion with `X-Cache: HIT` and **no provider call** — saving free-tier quota and answering instantly. Works for streaming (replayed as SSE) and non-streaming; bypass per-request with `x-cache: no-store`. Live hit-rate/entries stats in the dashboard.
 - **Anthropic-compatible** — `POST /v1/messages` (plus `POST /v1/messages/count_tokens`) speaks the native Claude Messages wire format, so Claude Code, the Anthropic SDKs, and any Messages-API client can point straight at the gateway and be answered by any free provider behind it. Full SSE streaming (`message_start` → `content_block_delta` → `message_stop`), tool use (`tool_use` / `tool_result`), system prompts, and image blocks are translated over the same router. Authenticates with the unified key via either `x-api-key` or `Authorization: Bearer`. Unknown Claude model ids (e.g. `claude-sonnet-4-5`) transparently fall through to auto-routing.
 - **Streaming and non-streaming** — Server-Sent Events for `stream: true`, JSON response otherwise. Every provider adapter implements both.
@@ -298,6 +299,18 @@ curl http://localhost:3001/v1/messages \
 ```
 
 Streaming (`"stream": true`) emits the full Anthropic SSE sequence — `message_start`, `content_block_start/delta/stop`, `message_delta`, `message_stop` — and tool use round-trips via `tool_use` / `tool_result` blocks. `POST /v1/messages/count_tokens` returns an `input_tokens` estimate for context sizing.
+
+### Image generation
+
+```bash
+curl http://localhost:3001/v1/images/generations \
+  -H "Authorization: Bearer freellmapi-your-unified-key" \
+  -H "Content-Type: application/json" \
+  -d '{ "prompt": "a neon city skyline at dusk", "size": "1792x1024" }'
+# → { "data": [{ "url": "https://api.a0.dev/assets/image?text=...&aspect=16:9" }] }
+```
+
+Works with the OpenAI Images SDK (`client.images.generate(...)`). `size` maps to an aspect ratio, or pass `"aspect": "16:9" | "9:16" | "1:1"` directly; `"response_format": "b64_json"` inlines the bytes.
 
 **Tool calling**
 
