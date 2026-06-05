@@ -59,6 +59,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV21PruneDead(db);
   migrateModelsV22Tools(db);
   migrateModelsV23KiloAuto(db);
+  migrateModelsV24KiloFreeRefresh(db);
   // After all model migrations: add/refresh paid-equivalent pricing
   // (drives the realistic "Est. savings" analytics stat).
   applyModelPricing(db);
@@ -1738,6 +1739,35 @@ function migrateModelsV23KiloAuto(db: Database.Database) {
     insert.run('kilo', 'kilo-auto/free', 'Kilo Auto (best free model)', 11, 6, 'Auto', null, null, null, null, 'free · 200/hr per IP', 262144);
     // Re-assert the tools flag every boot (V22's reset-then-set ran first).
     db.prepare("UPDATE models SET supports_tools = 1 WHERE platform = 'kilo' AND model_id = 'kilo-auto/free'").run();
+    backfillFallback(db);
+  });
+  apply();
+}
+
+/**
+ * V24 (June 2026): Refresh the Kilo free catalog against the live gateway model
+ * list (`/api/gateway/models`), keeping only free routes with ≥128k context that
+ * actually serve. Probed 2026-06-05 anonymously:
+ *   - all V20/V23 Kilo routes still serve → kept;
+ *   - `nvidia/nemotron-3-ultra-550b-a55b:free` returns whitespace (HTTP 200, no
+ *     JSON) and `openrouter/owl-alpha` 400s → excluded;
+ *   - added two confirmed-working free 128k+ tool-capable routes below.
+ * Idempotent (INSERT OR IGNORE + tools re-assert + fallback backfill).
+ */
+function migrateModelsV24KiloFreeRefresh(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const additions: Array<[string, string, string, number, number, string, number | null, number | null, number | null, number | null, string, number | null]> = [
+    // nano-omni: 30B reasoning, multimodal-in, fast. openrouter/free: Kilo's free
+    // auto-router across OpenRouter's free pool (vision-in).
+    ['kilo', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'Nemotron 3 Nano Omni 30B (Kilo)', 13, 7, 'Medium', null, null, null, null, 'free · 200/hr per IP', 256000],
+    ['kilo', 'openrouter/free',                                    'OpenRouter Free Auto (Kilo)',     14, 5, 'Auto',   null, null, null, null, 'free · 200/hr per IP', 200000],
+  ];
+  const apply = db.transaction(() => {
+    for (const a of additions) insert.run(...a);
+    db.prepare("UPDATE models SET supports_tools = 1 WHERE platform = 'kilo' AND model_id IN ('nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free', 'openrouter/free')").run();
     backfillFallback(db);
   });
   apply();

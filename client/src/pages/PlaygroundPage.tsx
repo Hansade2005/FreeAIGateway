@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Send, Trash2, Wrench, ImagePlus, X, Cpu, Zap, Clock, Gauge, Layers, MessageSquare, Columns3, Image as ImageIcon, Sparkles } from 'lucide-react'
+import { Send, Trash2, Wrench, ImagePlus, X, Cpu, Zap, Clock, Gauge, Layers, MessageSquare, Columns3, Image as ImageIcon, Sparkles, Download, Copy, Check } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -474,6 +474,26 @@ function useGateway() {
   return { apiKey: keyData?.apiKey, models: fallbackEntries.filter((e) => e.keyCount > 0 && e.enabled) }
 }
 
+// Re-encode any image blob (e.g. a0.dev's WebP) to PNG via a canvas — the one
+// clipboard image type browsers reliably accept.
+function toPngBlob(blob: Blob): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(blob)
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')
+      URL.revokeObjectURL(url)
+      if (!ctx) return reject(new Error('no canvas context'))
+      ctx.drawImage(img, 0, 0)
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')) }
+    img.src = url
+  })
+}
+
 // ── Image generation console ────────────────────────────────────────────────
 function ImageConsole() {
   const { apiKey } = useGateway()
@@ -482,6 +502,34 @@ function ImageConsole() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [images, setImages] = useState<{ url: string; path?: string }[]>([])
+  const [copied, setCopied] = useState<number | null>(null)
+
+  const extFor = (type: string) => (type.split('/')[1] || 'png').replace('jpeg', 'jpg')
+
+  async function downloadImage(url: string, i: number) {
+    try {
+      const blob = await (await fetch(url)).blob()
+      const href = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = href
+      a.download = `freeaigateway-image-${i + 1}.${extFor(blob.type)}`
+      document.body.appendChild(a); a.click(); a.remove()
+      URL.revokeObjectURL(href)
+    } catch { window.open(url, '_blank') }
+  }
+
+  async function copyImage(url: string, i: number) {
+    try {
+      const blob = await (await fetch(url)).blob()
+      // Copy the image itself when the browser supports it; PNG is the safest
+      // clipboard type, so re-encode via a canvas when needed.
+      const png = blob.type === 'image/png' ? blob : await toPngBlob(blob)
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+    } catch {
+      try { await navigator.clipboard.writeText(url) } catch { /* ignore */ }
+    }
+    setCopied(i); setTimeout(() => setCopied((c) => (c === i ? null : c)), 1500)
+  }
 
   async function generate() {
     const p = prompt.trim()
@@ -541,8 +589,27 @@ function ImageConsole() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {images.map((img, i) => (
-            <div key={i} className="animate-rise overflow-hidden rounded-2xl border bg-card">
-              <img src={img.url} alt="generated" className="aspect-square w-full bg-surface-2 object-cover" />
+            <div key={i} className="group animate-rise overflow-hidden rounded-2xl border bg-card">
+              <div className="relative">
+                <img src={img.url} alt="generated" loading="lazy" className="aspect-square w-full bg-surface-2 object-contain" />
+                {/* hover actions */}
+                <div className="absolute right-2 top-2 flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    onClick={() => downloadImage(img.url, i)}
+                    title="Download"
+                    className="flex size-8 items-center justify-center rounded-lg border border-white/15 bg-black/55 text-white backdrop-blur-sm hover:bg-black/75"
+                  >
+                    <Download className="size-4" />
+                  </button>
+                  <button
+                    onClick={() => copyImage(img.url, i)}
+                    title="Copy image"
+                    className="flex size-8 items-center justify-center rounded-lg border border-white/15 bg-black/55 text-white backdrop-blur-sm hover:bg-black/75"
+                  >
+                    {copied === i ? <Check className="size-4 text-signal" /> : <Copy className="size-4" />}
+                  </button>
+                </div>
+              </div>
               {img.path && (
                 <div className="truncate px-3 py-2 font-mono text-[10px] text-muted-foreground" title={img.path}>{img.path}</div>
               )}

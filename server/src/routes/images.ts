@@ -85,9 +85,32 @@ imagesRouter.get('/images/files/:name', (req: Request, res: Response) => {
     res.status(404).json({ error: { message: 'image not found', type: 'not_found' } });
     return;
   }
-  res.setHeader('Content-Type', 'image/png');
+  // Serve the ACTUAL image type. a0.dev returns WebP (not PNG), and with
+  // helmet's `nosniff` a wrong Content-Type makes the browser refuse to render
+  // it — so sniff the magic bytes instead of assuming image/png.
+  res.setHeader('Content-Type', sniffImageType(file));
   fs.createReadStream(file).pipe(res);
 });
+
+// Detect image type from the file's leading bytes (PNG / WebP / JPEG / GIF),
+// defaulting to PNG. Lets us send a correct Content-Type under `nosniff`.
+function sniffImageType(file: string): string {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(12);
+    fs.readSync(fd, head, 0, 12, 0);
+    if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return 'image/png';
+    if (head.toString('ascii', 0, 4) === 'RIFF' && head.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    if (head[0] === 0xff && head[1] === 0xd8) return 'image/jpeg';
+    if (head.toString('ascii', 0, 3) === 'GIF') return 'image/gif';
+    return 'image/png';
+  } catch {
+    return 'image/png';
+  } finally {
+    if (fd !== undefined) try { fs.closeSync(fd); } catch { /* ignore */ }
+  }
+}
 
 imagesRouter.post('/images/generations', async (req: Request, res: Response) => {
   const start = Date.now();
