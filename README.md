@@ -2,9 +2,9 @@
 
 # FreeLLMAPI
 
-**One OpenAI-compatible endpoint. Sixteen free LLM providers. ~1.7B tokens per month.**
+**One gateway, two protocols. Sixteen free LLM providers. ~1.7B tokens per month.**
 
-Aggregate the free tiers from Google, Groq, Cerebras, SambaNova, NVIDIA, Mistral, OpenRouter, GitHub Models, Cohere, Cloudflare, HuggingFace, Z.ai (Zhipu), Ollama, Kilo, Pollinations, and LLM7 — plus any custom OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, local Ollama) — behind a single `/v1/chat/completions` endpoint. Keys are stored encrypted. A router picks the best available model for each request, falls over to the next provider when one is rate-limited, and tracks per-key usage so you stay under every free-tier cap.
+Aggregate the free tiers from Google, Groq, Cerebras, SambaNova, NVIDIA, Mistral, OpenRouter, GitHub Models, Cohere, Cloudflare, HuggingFace, Z.ai (Zhipu), Ollama, Kilo, Pollinations, and LLM7 — plus any custom OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, local Ollama) — behind a single server that speaks **both** the OpenAI wire format (`/v1/chat/completions`, `/v1/responses`) **and** the Anthropic Messages wire format (`/v1/messages`). Point an OpenAI client *or* a Claude-native client (Claude Code, the Anthropic SDKs) at the same base URL. Keys are stored encrypted. A router picks the best available model for each request, falls over to the next provider when one is rate-limited, and tracks per-key usage so you stay under every free-tier cap.
 
 [![CI](https://github.com/tashfeenahmed/freellmapi/actions/workflows/ci.yml/badge.svg)](https://github.com/tashfeenahmed/freellmapi/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
@@ -75,6 +75,7 @@ Plus a **custom** provider — point at any OpenAI-compatible endpoint (llama.cp
 
 - **OpenAI-compatible** — `POST /v1/chat/completions` and `GET /v1/models` work with the official OpenAI SDKs and any OpenAI-compatible client (LangChain, LlamaIndex, Continue, Hermes, etc.). Just change `base_url`.
 - **Responses API** — `POST /v1/responses` (the wire format current Codex CLI versions require) is implemented as a translating shim over the same router, with full streaming events and tool calls.
+- **Anthropic-compatible** — `POST /v1/messages` (plus `POST /v1/messages/count_tokens`) speaks the native Claude Messages wire format, so Claude Code, the Anthropic SDKs, and any Messages-API client can point straight at the gateway and be answered by any free provider behind it. Full SSE streaming (`message_start` → `content_block_delta` → `message_stop`), tool use (`tool_use` / `tool_result`), system prompts, and image blocks are translated over the same router. Authenticates with the unified key via either `x-api-key` or `Authorization: Bearer`. Unknown Claude model ids (e.g. `claude-sonnet-4-5`) transparently fall through to auto-routing.
 - **Streaming and non-streaming** — Server-Sent Events for `stream: true`, JSON response otherwise. Every provider adapter implements both.
 - **Tool calling** — OpenAI-style `tools` / `tool_choice` requests are passed through, and assistant `tool_calls` + `tool` role follow-up messages round-trip across providers.
 - **Embeddings** — `/v1/embeddings` with family-based routing: failover only ever happens between providers serving the *same* model (vectors from different models are incompatible), never across models. See [Embeddings](#embeddings).
@@ -251,6 +252,52 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="", flush=True)
 ```
 
+### Anthropic-compatible endpoint
+
+The same server also speaks the native Anthropic Messages wire format at `POST /v1/messages`, so Claude-native clients work unchanged — just point the base URL at the gateway. The router still picks whichever free provider is available; the `model` field is accepted but real Claude ids fall through to auto-routing.
+
+**Anthropic Python SDK**
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://localhost:3001",
+    api_key="freellmapi-your-unified-key",
+)
+
+msg = client.messages.create(
+    model="claude-sonnet-4-5",  # accepted; routed to a free model
+    max_tokens=256,
+    messages=[{"role": "user", "content": "Summarise the fall of Rome in one sentence."}],
+)
+print(msg.content[0].text)
+```
+
+**Claude Code**
+
+```bash
+export ANTHROPIC_BASE_URL="http://localhost:3001"
+export ANTHROPIC_API_KEY="freellmapi-your-unified-key"
+claude
+```
+
+**curl**
+
+```bash
+curl http://localhost:3001/v1/messages \
+  -H "x-api-key: freellmapi-your-unified-key" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5",
+    "max_tokens": 256,
+    "messages": [{"role": "user", "content": "hi"}]
+  }'
+```
+
+Streaming (`"stream": true`) emits the full Anthropic SSE sequence — `message_start`, `content_block_start/delta/stop`, `message_delta`, `message_stop` — and tool use round-trips via `tool_use` / `tool_result` blocks. `POST /v1/messages/count_tokens` returns an `input_tokens` estimate for context sizing.
+
 **Tool calling**
 
 Pass OpenAI-style `tools` and `tool_choice`; the assistant response round-trips back through the proxy exactly like the OpenAI API. Multi-step flows (assistant `tool_calls` → `tool` role follow-up → final answer) work across every provider the router can reach.
@@ -374,11 +421,16 @@ Request volume, success rate, tokens in and out, average latency, and per-provid
 ## How it works
 
 ```
-┌──────────────────┐   Bearer freellmapi-…   ┌─────────────────────────┐
-│  OpenAI SDK /    │ ──────────────────────▶ │  Express proxy (:3001)  │
-│  curl / any      │ ◀────────────────────── │  /v1/chat/completions   │
-│  OpenAI client   │      streamed tokens    └────────────┬────────────┘
-└──────────────────┘                                      │
+┌──────────────────┐   Bearer / x-api-key    ┌─────────────────────────┐
+│  OpenAI SDK or   │ ──────────────────────▶ │  Express proxy (:3001)  │
+│  Anthropic SDK / │                         │  /v1/chat/completions   │
+│  Claude Code /   │ ◀────────────────────── │  /v1/responses          │
+│  curl / any      │      streamed tokens    │  /v1/messages           │
+└──────────────────┘                         └────────────┬────────────┘
+                                                          │
+                                          (Anthropic & Responses requests are
+                                           translated to the internal chat
+                                           format, then share the router below)
                                                           ▼
                              ┌────────────────────────────────────────────────┐
                              │  Router                                        │

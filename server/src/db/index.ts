@@ -58,6 +58,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV20KiloFree(db);
   migrateModelsV21PruneDead(db);
   migrateModelsV22Tools(db);
+  migrateModelsV23KiloAuto(db);
   // After all model migrations: add/refresh paid-equivalent pricing
   // (drives the realistic "Est. savings" analytics stat).
   applyModelPricing(db);
@@ -1709,6 +1710,35 @@ function migrateModelsV22Tools(db: Database.Database) {
         OR LOWER(model_id) LIKE '%nemotron-3-super%' -- benchmarked #8 with real tool calls; nano stays excluded
       )
     `).run();
+  });
+  apply();
+}
+
+/**
+ * V23 (June 2026): Kilo Gateway `kilo-auto/free` — Kilo's anonymous free
+ * auto-router. Instead of pinning a single upstream, `kilo-auto/free` lets Kilo
+ * pick the best available free model per request, which pairs naturally with
+ * this gateway's own "auto" routing: a single high-availability free entry that
+ * absorbs upstream churn without us tracking every individual `:free` id.
+ *
+ * Shares the same anonymous 200 req/hr-per-IP budget as the other Kilo free
+ * routes (keyless sentinel row, per-model limits left null). supports_tools is
+ * set explicitly here because migrateModelsV22Tools runs BEFORE this migration
+ * and resets the flag to 0 on every boot — the LIKE rules there don't (and
+ * shouldn't) match a generic "auto" id, so we assert the capability directly
+ * (the router only ever dispatches free tool-capable models). Idempotent
+ * (INSERT OR IGNORE + an explicit capability UPDATE + fallback backfill).
+ */
+function migrateModelsV23KiloAuto(db: Database.Database) {
+  const insert = db.prepare(`
+    INSERT OR IGNORE INTO models (platform, model_id, display_name, intelligence_rank, speed_rank, size_label, rpm_limit, rpd_limit, tpm_limit, tpd_limit, monthly_token_budget, context_window)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const apply = db.transaction(() => {
+    insert.run('kilo', 'kilo-auto/free', 'Kilo Auto (best free model)', 11, 6, 'Auto', null, null, null, null, 'free · 200/hr per IP', 262144);
+    // Re-assert the tools flag every boot (V22's reset-then-set ran first).
+    db.prepare("UPDATE models SET supports_tools = 1 WHERE platform = 'kilo' AND model_id = 'kilo-auto/free'").run();
+    backfillFallback(db);
   });
   apply();
 }
