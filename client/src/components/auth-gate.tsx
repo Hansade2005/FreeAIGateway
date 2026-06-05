@@ -4,6 +4,7 @@ import { apiFetch, setToken, UNAUTHORIZED_EVENT } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Wordmark } from '@/components/brand'
 
 interface AuthStatus {
   needsSetup: boolean
@@ -13,8 +14,8 @@ interface AuthStatus {
 
 function Centered({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
-      <div className="w-full max-w-sm">{children}</div>
+    <div className="grain app-canvas min-h-screen flex items-center justify-center px-4">
+      <div className="relative z-10 w-full max-w-sm">{children}</div>
     </div>
   )
 }
@@ -47,12 +48,11 @@ function AuthForm({ mode, onAuthed }: { mode: 'setup' | 'login'; onAuthed: () =>
 
   return (
     <Centered>
-      <div className="mb-6 flex items-center gap-2">
-        <span className="inline-block size-2 rounded-full bg-foreground" />
-        <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
+      <div className="mb-6 flex justify-center animate-rise">
+        <Wordmark />
       </div>
-      <div className="rounded-3xl border bg-card p-6">
-        <h1 className="text-base font-medium">{isSetup ? 'Create your account' : 'Sign in'}</h1>
+      <div className="animate-rise rounded-3xl border bg-card/80 p-6 shadow-glow backdrop-blur-xl">
+        <h1 className="font-display text-lg font-semibold tracking-tight">{isSetup ? 'Create your account' : 'Sign in'}</h1>
         <p className="text-xs text-muted-foreground mt-1 mb-4">
           {isSetup
             ? 'Set the email and password that will protect this dashboard.'

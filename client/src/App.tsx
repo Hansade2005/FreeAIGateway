@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { BrowserRouter, Routes, Route, Navigate, NavLink, Link, useLocation, useNavigate } from 'react-router-dom'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Menu, Moon, Sun } from 'lucide-react'
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { Menu, Moon, Sun, Boxes, Terminal, KeyRound, Activity, SlidersHorizontal } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -12,53 +12,68 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { AuthGate } from '@/components/auth-gate'
-import { logout } from '@/lib/api'
+import { BrandLink } from '@/components/brand'
+import { apiFetch, logout } from '@/lib/api'
 import KeysPage from '@/pages/KeysPage'
 import PlaygroundPage from '@/pages/PlaygroundPage'
 import FallbackPage from '@/pages/FallbackPage'
 import EmbeddingsPage from '@/pages/EmbeddingsPage'
 import AnalyticsPage from '@/pages/AnalyticsPage'
+import SettingsPage from '@/pages/SettingsPage'
 
 const queryClient = new QueryClient()
 
 const navItems = [
-  { to: '/models', label: 'Models' },
-  { to: '/playground', label: 'Playground' },
-  { to: '/keys', label: 'Keys' },
-  { to: '/analytics', label: 'Analytics' },
+  { to: '/models', label: 'Models', icon: Boxes },
+  { to: '/playground', label: 'Playground', icon: Terminal },
+  { to: '/keys', label: 'Keys', icon: KeyRound },
+  { to: '/analytics', label: 'Analytics', icon: Activity },
+  { to: '/settings', label: 'Settings', icon: SlidersHorizontal },
 ]
 
 function getPreferredDarkMode() {
-  if (typeof window === 'undefined') {
-    return false
-  }
-
-  const stored = localStorage.getItem('theme')
-  return stored === 'dark' || (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  if (typeof window === 'undefined') return true
+  // Dark-first by brand: only an explicit 'light' choice opts out.
+  return localStorage.getItem('theme') !== 'light'
 }
 
-function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
+function isActivePath(pathname: string, to: string) {
+  return pathname === to || pathname.startsWith(to + '/')
+}
+
+function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: typeof Boxes }) {
   return (
     <NavLink
       to={to}
       className={({ isActive }) =>
-        `relative text-sm px-1 py-4 transition-colors ${
-          isActive
-            ? 'text-foreground after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-foreground'
-            : 'text-muted-foreground hover:text-foreground'
+        `group relative flex items-center gap-2 px-1 py-4 text-sm transition-colors ${
+          isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
         }`
       }
     >
-      {children}
+      {({ isActive }) => (
+        <>
+          <Icon className={`size-4 transition-colors ${isActive ? 'text-signal' : ''}`} />
+          <span>{label}</span>
+          {/* signal underline on the active route */}
+          <span
+            className={`absolute inset-x-0 -bottom-px h-0.5 rounded-full transition-all ${
+              isActive ? 'bg-signal opacity-100' : 'opacity-0 group-hover:opacity-40 group-hover:bg-foreground'
+            }`}
+          />
+        </>
+      )}
     </NavLink>
   )
 }
 
-function useDarkMode() {
+function useTheme() {
   const [dark, setDark] = useState(getPreferredDarkMode)
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark)
+    const root = document.documentElement
+    root.classList.toggle('dark', dark)
+    root.classList.toggle('light', !dark)
   }, [dark])
 
   function toggle() {
@@ -72,7 +87,7 @@ function useDarkMode() {
   return { dark, toggle }
 }
 
-function DarkModeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
+function ThemeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => void }) {
   return (
     <Button
       variant="ghost"
@@ -85,64 +100,67 @@ function DarkModeToggle({ dark, onToggle }: { dark: boolean; onToggle: () => voi
   )
 }
 
-function Brand() {
+// Live gateway heartbeat — pings the unauthenticated /api/ping every 20s.
+function StatusPill() {
+  const { isSuccess, isError } = useQuery({
+    queryKey: ['ping'],
+    queryFn: () => apiFetch<{ status: string }>('/api/ping'),
+    refetchInterval: 20000,
+    retry: false,
+  })
+  const online = isSuccess && !isError
   return (
-    <Link to="/" className="flex items-center gap-2 transition-opacity hover:opacity-70">
-      <span className="inline-block size-2 rounded-full bg-foreground" />
-      <span className="font-semibold tracking-tight text-sm">FreeLLMAPI</span>
-    </Link>
+    <div className="hidden items-center gap-2 rounded-full border bg-surface-1/60 px-3 py-1 text-[11px] font-mono uppercase tracking-wider lg:flex">
+      {online ? (
+        <>
+          <span className="status-dot" />
+          <span className="text-muted-foreground">Gateway online</span>
+        </>
+      ) : (
+        <>
+          <span className="size-2 rounded-full bg-warn" />
+          <span className="text-muted-foreground">Connecting…</span>
+        </>
+      )}
+    </div>
   )
 }
 
-// True when the dashboard runs inside the desktop shell (Electron preload
-// sets this). The navbar then doubles as the window title bar: draggable,
-// padded for the macOS traffic lights, and without the web-only Sign out.
 const isDesktopApp = typeof window !== 'undefined' && (window as any).__FREEAPI_DESKTOP__ === true
 
-// The preload's own early classList.add can be lost (it may run before this
-// document exists), so the client claims the class itself at module load —
-// before the first React paint — keeping html.desktop CSS (transparent body,
-// glass backdrop) reliable.
 if (isDesktopApp) {
   document.documentElement.classList.add('desktop')
 }
 
 function Navbar() {
-  const { dark, toggle } = useDarkMode()
+  const { dark, toggle } = useTheme()
   const location = useLocation()
   const navigate = useNavigate()
 
-  function isActiveRoute(to: string) {
-    return location.pathname === to
-  }
-
   return (
     <header
-      // In the desktop shell the body backdrop is already translucent glass;
-      // a lighter wash keeps the title bar from looking more solid than the page.
-      className={`sticky top-0 z-40 border-b backdrop-blur ${isDesktopApp ? 'bg-background/45' : 'bg-background/80'}`}
+      className={`sticky top-0 z-40 border-b backdrop-blur-xl ${isDesktopApp ? 'glass' : 'bg-background/70'}`}
       style={isDesktopApp ? ({ WebkitAppRegion: 'drag' } as React.CSSProperties) : undefined}
     >
       <div
-        className={`mx-auto flex max-w-6xl items-center px-4 sm:px-6 ${isDesktopApp ? 'pl-20 sm:pl-20' : ''}`}
-        style={isDesktopApp ? { minHeight: 52 } : undefined}
+        className={`mx-auto flex max-w-7xl items-center px-4 sm:px-6 ${isDesktopApp ? 'pl-20 sm:pl-20' : ''}`}
+        style={isDesktopApp ? { minHeight: 56 } : undefined}
       >
-        <Brand />
+        <BrandLink />
         <nav
-          className="ml-10 hidden items-center gap-6 md:flex"
+          className="ml-10 hidden items-center gap-7 md:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
           {navItems.map((item) => (
-            <NavItem key={item.to} to={item.to}>
-              {item.label}
-            </NavItem>
+            <NavItem key={item.to} {...item} />
           ))}
         </nav>
         <div
-          className="ml-auto hidden items-center gap-1 md:flex"
+          className="ml-auto hidden items-center gap-2 md:flex"
           style={isDesktopApp ? ({ WebkitAppRegion: 'no-drag' } as React.CSSProperties) : undefined}
         >
-          <DarkModeToggle dark={dark} onToggle={toggle} />
+          <StatusPill />
+          <ThemeToggle dark={dark} onToggle={toggle} />
           {!isDesktopApp && (
             <Button variant="ghost" size="sm" onClick={() => logout()}>
               Sign out
@@ -157,14 +175,15 @@ function Navbar() {
             >
               <Menu />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuContent align="end" className="w-56">
               <DropdownMenuGroup>
                 {navItems.map((item) => (
                   <DropdownMenuItem
                     key={item.to}
                     onClick={() => navigate(item.to)}
-                    className={isActiveRoute(item.to) ? 'bg-accent text-accent-foreground font-medium' : undefined}
+                    className={isActivePath(location.pathname, item.to) ? 'bg-accent text-accent-foreground font-medium' : undefined}
                   >
+                    <item.icon className="size-4" />
                     {item.label}
                   </DropdownMenuItem>
                 ))}
@@ -192,9 +211,9 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter basename={import.meta.env.BASE_URL}>
         <AuthGate>
-          <div className={`min-h-screen ${isDesktopApp ? 'desktop-backdrop' : 'bg-background'}`}>
+          <div className={`grain relative min-h-screen ${isDesktopApp ? 'desktop-backdrop' : 'app-canvas'}`}>
             <Navbar />
-            <main className="max-w-6xl mx-auto px-6 py-8">
+            <main className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6">
               <Routes>
                 <Route path="/" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/models" element={<Navigate to="/models/chat" replace />} />
@@ -202,6 +221,7 @@ function App() {
                 <Route path="/models/embeddings" element={<EmbeddingsPage />} />
                 <Route path="/playground" element={<PlaygroundPage />} />
                 <Route path="/keys" element={<KeysPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/fallback" element={<Navigate to="/models/chat" replace />} />
                 <Route path="/analytics" element={<AnalyticsPage />} />
                 <Route path="/test" element={<Navigate to="/playground" replace />} />
