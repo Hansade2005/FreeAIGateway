@@ -8,7 +8,7 @@ import type {
   ChatToolDefinition,
   ChatToolChoice,
   ChatContentBlock,
-} from '@freellmapi/shared/types.js';
+} from '@freeaigateway/shared/types.js';
 import {
   routeRequest,
   recordRateLimitHit,

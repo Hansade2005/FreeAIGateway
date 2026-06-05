@@ -1,5 +1,5 @@
 {
-  "name": "freellmapi",
+  "name": "freeaigateway",
   "private": true,
   "workspaces": [
     "shared",

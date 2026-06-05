@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
 import { getSetting, setSetting } from '../db/index.js';
-import type { ChatToolDefinition } from '@freellmapi/shared/types.js';
+import type { ChatToolDefinition } from '@freeaigateway/shared/types.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Built-in, server-executed tools.

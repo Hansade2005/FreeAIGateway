@@ -3,7 +3,7 @@ import type {
   ChatCompletionResponse,
   ChatCompletionChunk,
   Platform,
-} from '@freellmapi/shared/types.js';
+} from '@freeaigateway/shared/types.js';
 import { BaseProvider, type CompletionOptions } from './base.js';
 
 /**

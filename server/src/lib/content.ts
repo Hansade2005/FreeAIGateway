@@ -1,11 +1,11 @@
-import type { ChatMessage } from '@freellmapi/shared/types.js';
+import type { ChatMessage } from '@freeaigateway/shared/types.js';
 
 // OpenAI-spec message content can be one of:
 //   - string                        (plain text)
 //   - null                          (assistant with tool_calls only)
 //   - Array<ContentBlock>           (multimodal envelope; we extract text only)
 //
-// freellmapi accepts the array envelope so clients like opencode and
+// FreeAIGateway accepts the array envelope so clients like opencode and
 // continue.dev (which always serialize as arrays) don't 400. Non-text blocks
 // are dropped silently — vision/audio aren't supported (see README).
 export type ContentTextBlock = { type: 'text'; text: string };

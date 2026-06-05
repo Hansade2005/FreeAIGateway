@@ -1,6 +1,6 @@
 // Bundles desktop/src/server-host.ts (and through it the whole server) into
 // build/server.mjs. esbuild resolves the server's `.js`-suffixed TS imports
-// and flattens the @freellmapi/shared workspace symlink — only better-sqlite3
+// and flattens the @freeaigateway/shared workspace symlink — only better-sqlite3
 // stays external (native module, electron-rebuilt in desktop/node_modules).
 import { build } from 'esbuild';
 import path from 'node:path';

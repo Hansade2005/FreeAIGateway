@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { getSetting, setSetting } from '../db/index.js';
-import type { ChatMessage, ChatCompletionResponse } from '@freellmapi/shared/types.js';
+import type { ChatMessage, ChatCompletionResponse } from '@freeaigateway/shared/types.js';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Prompt/response cache.
