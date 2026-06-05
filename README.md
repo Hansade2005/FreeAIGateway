@@ -1,15 +1,26 @@
 <div align="center">
 
+<img src="repo-assets/logo.png" alt="FreeAIGateway" height="96" onerror="this.style.display='none'" />
+
 # FreeAIGateway
 
-**One gateway, two protocols. Sixteen free LLM providers. ~1.7B tokens per month.**
+### One gateway. Two protocols. Sixteen free LLM providers. ~1.7B tokens/month.
 
-Aggregate the free tiers from Google, Groq, Cerebras, SambaNova, NVIDIA, Mistral, OpenRouter, GitHub Models, Cohere, Cloudflare, HuggingFace, Z.ai (Zhipu), Ollama, Kilo, Pollinations, and LLM7 — plus any custom OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, local Ollama) — behind a single server that speaks **both** the OpenAI wire format (`/v1/chat/completions`, `/v1/responses`) **and** the Anthropic Messages wire format (`/v1/messages`). Point an OpenAI client *or* a Claude-native client (Claude Code, the Anthropic SDKs) at the same base URL. Keys are stored encrypted. A router picks the best available model for each request, falls over to the next provider when one is rate-limited, and tracks per-key usage so you stay under every free-tier cap.
+A single self-hosted server that aggregates the free tiers of **16 major LLM providers** behind **one unified API key** — speaking **both** the OpenAI wire format (`/v1/chat/completions`, `/v1/responses`) **and** the Anthropic Messages format (`/v1/messages`). Point an OpenAI client, the Anthropic SDK, or Claude Code at the same base URL. A smart router picks the best available model per request, fails over when one is rate-limited, and tracks per-key usage so you never blow a free-tier cap.
+
+<br/>
 
 [![CI](https://github.com/Hansade2005/FreeAIGateway/actions/workflows/ci.yml/badge.svg)](https://github.com/Hansade2005/FreeAIGateway/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
 [![Docker image](https://img.shields.io/badge/ghcr.io-freellmapi-2496ED?logo=docker&logoColor=white)](https://github.com/Hansade2005/FreeAIGateway/pkgs/container/freellmapi)
+[![Node](https://img.shields.io/badge/node-20%2B-339933?logo=node.js&logoColor=white)](#quick-start)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#contributing)
+
+<br/>
+
+[**Quick start**](#quick-start) · [**Providers**](#supported-providers) · [**API docs**](#using-the-api) · [**How it works**](#how-it-works) · [**Contributing**](#contributing)
+
+<br/>
 
 ![Fallback chain with per-provider token budget](repo-assets/fallback-chain.png)
 
@@ -19,26 +30,41 @@ Aggregate the free tiers from Google, Groq, Cerebras, SambaNova, NVIDIA, Mistral
 
 ## Contents
 
-- [Why this exists](#why-this-exists)
-- [Supported providers](#supported-providers)
-- [Features](#features)
-- [Not yet supported](#not-yet-supported)
-- [Quick start](#quick-start)
-- [Docker](#docker)
-- [Desktop app](#desktop-app)
-- [Using the API](#using-the-api)
-- [Screenshots](#screenshots)
-- [How it works](#how-it-works)
-- [Limitations](#limitations)
-- [Contributing](#contributing)
-- [Terms of Service review](#terms-of-service-review)
-- [Disclaimer](#disclaimer)
+| | | |
+|---|---|---|
+| [Why this exists](#why-this-exists) | [Quick start](#quick-start) | [How it works](#how-it-works) |
+| [At a glance](#at-a-glance) | [Docker](#docker) | [Limitations](#limitations) |
+| [Supported providers](#supported-providers) | [Desktop app](#desktop-app) | [Contributing](#contributing) |
+| [Features](#features) | [Using the API](#using-the-api) | [Terms of Service review](#terms-of-service-review) |
+| [Not yet supported](#not-yet-supported) | [Screenshots](#screenshots) | [Disclaimer](#disclaimer) |
+
+---
 
 ## Why this exists
 
-Every serious AI lab now offers a free tier — a few million tokens a month, a few thousand requests a day. On its own each tier is a toy. Stacked together, they add up to roughly **1.7 billion tokens per month** of working inference capacity, across 100+ models from small-and-fast to reasonably capable.
+Every serious AI lab now ships a free tier — a few million tokens a month, a few thousand requests a day. On its own, each one is a toy. **Stacked together, they add up to roughly 1.7 billion tokens per month** of working inference, across 100+ models from small-and-fast to genuinely capable.
 
-The problem is that stacking them by hand is painful: sixteen different SDKs, sixteen different rate limits, sixteen places a request can fail. FreeAIGateway collapses that into **one gateway that speaks two protocols** — the OpenAI wire format (`/v1/chat/completions`, `/v1/responses`) **and** the Anthropic Messages format (`/v1/messages`). Point an OpenAI client, the Anthropic SDK, or Claude Code at the same base URL, and it routes transparently across whichever providers you've added keys for — with optional prompt caching and built-in web-search / web-extract / image-generation tools on top.
+The catch is that stacking them by hand is miserable: sixteen SDKs, sixteen rate limits, sixteen places a request can fail. FreeAIGateway collapses all of that into **one gateway that speaks two protocols** — OpenAI (`/v1/chat/completions`, `/v1/responses`) **and** Anthropic Messages (`/v1/messages`). Point any compatible client at a single base URL, and the gateway routes transparently across whichever providers you've added keys for — with optional prompt caching and built-in web-search, web-extract, and image-generation tools layered on top.
+
+> **TL;DR** — A drop-in, self-hosted, OpenAI **and** Anthropic-compatible proxy that turns 16 free tiers into one reliable endpoint with automatic failover, encrypted key storage, and a full admin dashboard.
+
+---
+
+## At a glance
+
+| | |
+|---|---|
+| **Protocols** | OpenAI (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/images/generations`) · Anthropic Messages (`/v1/messages`) |
+| **Providers** | 16 free tiers + any custom OpenAI-compatible endpoint |
+| **Capacity** | ~1.7B tokens/month aggregate · 100+ models |
+| **Routing** | Priority-based with health checks, rate-limit ledger, automatic failover (up to 20 attempts) |
+| **Auth** | One unified `freellmapi-…` key for apps · email + password for the dashboard |
+| **Security** | AES-256-GCM encrypted key storage in SQLite |
+| **Footprint** | Node 20+ · multi-arch Docker (`amd64` + `arm64`, Raspberry Pi ready) · ~40 MB RSS at idle |
+| **Extras** | Prompt cache · built-in agent tools · streaming · tool calling · vision input · embeddings |
+| **License** | MIT |
+
+---
 
 ## Supported providers
 
@@ -69,47 +95,66 @@ The problem is that stacking them by hand is painful: sixteen different SDKs, si
 </tr>
 </table>
 
-Plus a **custom** provider — point at any OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, a local Ollama, or a remote gateway) from the Keys page.
+> **➕ Custom provider** — point at any OpenAI-compatible endpoint (llama.cpp, LM Studio, vLLM, a local Ollama, or a remote gateway) directly from the **Keys** page.
+
+---
 
 ## Features
 
-- **OpenAI-compatible** — `POST /v1/chat/completions` and `GET /v1/models` work with the official OpenAI SDKs and any OpenAI-compatible client (LangChain, LlamaIndex, Continue, Hermes, etc.). Just change `base_url`.
-- **Responses API** — `POST /v1/responses` (the wire format current Codex CLI versions require) is implemented as a translating shim over the same router, with full streaming events and tool calls.
-- **Image generation** — `POST /v1/images/generations` (OpenAI Images shape: `prompt`, `n`, `size`, `response_format`) backed by a0.dev's keyless text-to-image endpoint. `size` maps to an aspect ratio (square / 16:9 / 9:16; or pass `aspect` directly); returns `{ data: [{ url }] }` or `b64_json`. No provider key needed — rides the unified key.
-- **Built-in tools** — the gateway can run tools itself, turning plain auto-routed chat into a lightweight agent: **web_search** (live web via r.jina.ai over DuckDuckGo), **web_extract** (URL → clean markdown), and **generate_image** (text → PNG saved to the server and appended to the answer as an inline markdown image, so it renders in the Playground or any markdown client). When the model calls one, the gateway executes it, feeds the result back, and re-asks until a final answer. On by default and individually toggleable in Settings; applied only to auto-routed, tool-free, non-streaming requests (explicit model pins and client tools are untouched), and bypassable with `x-builtin-tools: off`.
-- **Prompt cache** — opt-in in-memory TTL cache (Settings → Prompt cache). An identical request returns the stored completion with `X-Cache: HIT` and **no provider call** — saving free-tier quota and answering instantly. Works for streaming (replayed as SSE) and non-streaming; bypass per-request with `x-cache: no-store`. Live hit-rate/entries stats in the dashboard.
-- **Anthropic-compatible** — `POST /v1/messages` (plus `POST /v1/messages/count_tokens`) speaks the native Claude Messages wire format, so Claude Code, the Anthropic SDKs, and any Messages-API client can point straight at the gateway and be answered by any free provider behind it. Full SSE streaming (`message_start` → `content_block_delta` → `message_stop`), tool use (`tool_use` / `tool_result`), system prompts, and image blocks are translated over the same router. Authenticates with the unified key via either `x-api-key` or `Authorization: Bearer`. Unknown Claude model ids (e.g. `claude-sonnet-4-5`) transparently fall through to auto-routing.
-- **Streaming and non-streaming** — Server-Sent Events for `stream: true`, JSON response otherwise. Every provider adapter implements both.
-- **Tool calling** — OpenAI-style `tools` / `tool_choice` requests are passed through, and assistant `tool_calls` + `tool` role follow-up messages round-trip across providers.
-- **Embeddings** — `/v1/embeddings` with family-based routing: failover only ever happens between providers serving the *same* model (vectors from different models are incompatible), never across models. See [Embeddings](#embeddings).
-- **Automatic fallover** — If the chosen provider returns a 429, 5xx, or times out, the router skips it, puts the key on a short cooldown, and retries on the next model in your fallback chain (up to 20 attempts).
-- **Per-key rate tracking** — RPM, RPD, TPM, and TPD counters per `(platform, model, key)` so the router always picks a key that's under its caps.
-- **Sticky sessions** — Multi-turn conversations keep talking to the same model for 30 minutes to avoid the hallucination spike that comes from mid-conversation model switches.
-- **Encrypted key storage** — API keys are encrypted with AES-256-GCM before hitting SQLite; decryption happens in-memory just before a request.
-- **Unified API key** — Clients authenticate to your proxy with a single `freellmapi-…` bearer token. You never expose upstream provider keys to your apps.
-- **Dashboard login** — The admin UI and all `/api/*` routes are gated behind an email + password account (scrypt-hashed, session-token auth), set on first run. The `/v1` proxy keeps its own unified-key auth for apps.
-- **Health checks** — Periodic probes mark keys as `healthy`, `rate_limited`, `invalid`, or `error` so the router skips dead ones automatically.
+#### 🔌 Compatibility
+
+- **OpenAI-compatible** — `POST /v1/chat/completions` and `GET /v1/models` work with the official OpenAI SDKs and any OpenAI-compatible client (LangChain, LlamaIndex, Continue, Hermes, …). Just change `base_url`.
+- **Anthropic-compatible** — `POST /v1/messages` (plus `POST /v1/messages/count_tokens`) speaks the native Claude Messages wire format, so Claude Code, the Anthropic SDKs, and any Messages-API client point straight at the gateway and get answered by any free provider behind it. Full SSE streaming (`message_start` → `content_block_delta` → `message_stop`), tool use (`tool_use` / `tool_result`), system prompts, and image blocks are translated over the same router. Authenticates via `x-api-key` or `Authorization: Bearer`. Unknown Claude model ids (e.g. `claude-sonnet-4-5`) transparently fall through to auto-routing.
+- **Responses API** — `POST /v1/responses` (the wire format current Codex CLI versions require) is a translating shim over the same router, with full streaming events and tool calls.
+
+#### 🧠 Routing & reliability
+
+- **Automatic failover** — on a 429, 5xx, or timeout the router skips the provider, puts the key on a short cooldown, and retries the next model in your fallback chain (up to 20 attempts).
+- **Per-key rate tracking** — RPM, RPD, TPM, and TPD counters per `(platform, model, key)`, so the router always picks a key that's under its caps.
+- **Sticky sessions** — multi-turn conversations keep talking to the same model for 30 minutes, avoiding the hallucination spike from mid-conversation model switches.
+- **Health checks** — periodic probes mark keys `healthy`, `rate_limited`, `invalid`, or `error` so dead keys are skipped automatically.
+
+#### ⚡ Performance & cost
+
+- **Prompt cache** — opt-in in-memory TTL cache. An identical request returns the stored completion with `X-Cache: HIT` and **no provider call** — saving free-tier quota and answering instantly. Works for streaming (replayed as SSE) and non-streaming; bypass per-request with `x-cache: no-store`. Live hit-rate/entries stats in the dashboard.
+- **Streaming & non-streaming** — Server-Sent Events for `stream: true`, JSON otherwise. Every provider adapter implements both.
+
+#### 🛠️ Capabilities
+
+- **Built-in agent tools** — the gateway can run tools itself, turning auto-routed chat into a lightweight agent: **web_search** (live web via r.jina.ai over DuckDuckGo), **web_extract** (URL → clean markdown), and **generate_image** (text → PNG saved server-side and appended as an inline markdown image). On by default, individually toggleable in Settings; applied only to auto-routed, tool-free, non-streaming requests, and bypassable with `x-builtin-tools: off`.
+- **Tool calling** — OpenAI-style `tools` / `tool_choice` requests pass through, and assistant `tool_calls` + `tool`-role follow-ups round-trip across providers.
+- **Vision input** — standard OpenAI `image_url` blocks restrict routing to vision-capable models automatically.
+- **Image generation** — `POST /v1/images/generations` (OpenAI Images shape) backed by a0.dev's keyless text-to-image endpoint. No provider key needed.
+- **Embeddings** — `/v1/embeddings` with family-based routing: failover only happens between providers serving the *same* model, never across models.
+
+#### 🔐 Security & operations
+
+- **Encrypted key storage** — provider keys are AES-256-GCM encrypted before hitting SQLite; decryption happens in-memory just before a request.
+- **Unified API key** — clients authenticate with a single `freellmapi-…` bearer token. Upstream provider keys are never exposed to your apps.
+- **Dashboard login** — the admin UI and `/api/*` routes are gated behind an email + password account (scrypt-hashed, session-token auth), set on first run.
 - **Admin dashboard** — React + Vite UI to manage keys, reorder the fallback chain, inspect analytics, and run prompts in a playground. Dark mode included.
-- **Analytics** — Per-request logging with latency, token counts, success rate, and per-provider breakdowns.
-- **Runs anywhere Node 20+ runs** — Windows, macOS, Linux servers, or a small ARM SBC (Raspberry Pi included). ~40 MB RSS at idle behind PM2 / systemd / whatever supervisor you prefer.
+- **Analytics** — per-request logging with latency, token counts, success rate, and per-provider breakdowns.
+- **Runs anywhere Node 20+ runs** — Windows, macOS, Linux, or an ARM SBC (Raspberry Pi included). ~40 MB RSS at idle behind PM2 / systemd / any supervisor.
+
+---
 
 ## Not yet supported
 
-The scope is deliberately narrow. If a feature isn't on this list and isn't below, assume it isn't there yet.
+The scope is deliberately narrow. If a feature isn't listed above and isn't here, assume it isn't there yet — **PRs welcome** (see [Contributing](#contributing)).
 
-- **Audio / speech** (`/v1/audio/*`)
-- **Legacy completions** (`/v1/completions`) — only the chat endpoint is implemented
-- **Moderation** (`/v1/moderations`)
-- **`n > 1` for chat** (multiple completions per request) — supported on `/v1/images/generations`, not on chat
-- **Per-user billing / multi-tenant auth** — single-user by design
+- Audio / speech (`/v1/audio/*`)
+- Legacy completions (`/v1/completions`) — only the chat endpoint is implemented
+- Moderation (`/v1/moderations`)
+- `n > 1` for chat — supported on `/v1/images/generations`, not on chat
+- Per-user billing / multi-tenant auth — single-user by design
 
-PRs that add any of these are very welcome. See [Contributing](#contributing).
+---
 
 ## Quick start
 
-**Recommended:** Docker Compose. It runs the API and dashboard together on port 3001 and persists SQLite in a named volume.
-
-**Prerequisites:** Docker, Docker Compose, OpenSSL.
+> **Recommended:** Docker Compose. Runs the API and dashboard together on port `3001` and persists SQLite in a named volume.
+>
+> **Prerequisites:** Docker, Docker Compose, OpenSSL.
 
 ```bash
 git clone https://github.com/Hansade2005/FreeAIGateway.git
@@ -122,9 +167,9 @@ printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 docker compose up -d
 ```
 
-Open http://localhost:3001, add your provider keys on the **Keys** page, reorder the **Fallback Chain** to taste, and grab your unified API key from the **Keys** page header. That unified key is what you point your OpenAI SDK at.
+Open **http://localhost:3001**, add your provider keys on the **Keys** page, reorder the **Fallback Chain** to taste, and grab your unified API key from the **Keys** page header. That unified key is what you point your OpenAI or Anthropic SDK at.
 
-> **Reaching it from another machine?** By default the container is published only on `127.0.0.1`, so `http://<server-ip>:3001` won't load from another device (the page just hangs). To expose it on your LAN — e.g. a Raspberry Pi at `http://192.168.1.x:3001` — start it with `HOST_BIND=0.0.0.0`:
+> **Reaching it from another machine?** By default the container is published only on `127.0.0.1`, so `http://<server-ip>:3001` won't load from another device. To expose it on your LAN — e.g. a Raspberry Pi at `http://192.168.1.x:3001` — start it with `HOST_BIND=0.0.0.0`:
 >
 > ```bash
 > HOST_BIND=0.0.0.0 docker compose up -d
@@ -132,7 +177,10 @@ Open http://localhost:3001, add your provider keys on the **Keys** page, reorder
 >
 > Only do this on a trusted network: the proxy is single-user and guarded only by the unified API key.
 
-### Local development
+<details>
+<summary><b>Local development (Node.js)</b></summary>
+
+<br/>
 
 **Prerequisites:** Node.js 20+, npm.
 
@@ -146,32 +194,37 @@ printf "ENCRYPTION_KEY=%s\nPORT=3001\n" "$ENCRYPTION_KEY" > .env
 npm run dev
 ```
 
-`ENCRYPTION_KEY` is required for startup. The server only falls back to a
-database-stored development key when `DEV_MODE=true` and `NODE_ENV` is not
-`production`; do not use that fallback with real provider keys.
+`ENCRYPTION_KEY` is required for startup. The server only falls back to a database-stored development key when `DEV_MODE=true` and `NODE_ENV` is not `production`; do not use that fallback with real provider keys.
 
-Request analytics are retained for 90 days or 100000 request rows by default,
-whichever limit prunes first. Set `REQUEST_ANALYTICS_RETENTION_DAYS=0` or
-`REQUEST_ANALYTICS_MAX_ROWS=0` in `.env` to disable either retention limit.
+Request analytics are retained for 90 days or 100,000 request rows by default, whichever prunes first. Set `REQUEST_ANALYTICS_RETENTION_DAYS=0` or `REQUEST_ANALYTICS_MAX_ROWS=0` in `.env` to disable either limit.
 
-Open http://localhost:5173 (the Vite dev UI), add your provider keys on the **Keys** page, reorder the **Fallback Chain** to taste, and grab your unified API key from the **Keys** page header. That unified key is what you point your OpenAI SDK at.
+Open **http://localhost:5173** (the Vite dev UI) and configure as above.
 
-For a production build without Docker:
+</details>
+
+<details>
+<summary><b>Production build without Docker</b></summary>
+
+<br/>
 
 ```bash
 npm run build
 node server/dist/index.js     # server + dashboard both served on :3001
 ```
 
+</details>
+
+---
+
 ## Docker
 
-FreeAIGateway publishes a single production image that contains the Express server and the built React dashboard:
+FreeAIGateway publishes a single production image containing the Express server and the built React dashboard:
 
 ```bash
 docker pull ghcr.io/Hansade2005/FreeAIGateway:latest   # or pin a release, e.g. :v1.2.3
 ```
 
-The image is multi-arch (`linux/amd64` + `linux/arm64`, so it runs on a Raspberry Pi). Published tags: `latest` (default branch), `v*.*.*` (git release tags), and `sha-<commit>`.
+The image is **multi-arch** (`linux/amd64` + `linux/arm64`, so it runs on a Raspberry Pi). Published tags: `latest` (default branch), `v*.*.*` (git release tags), and `sha-<commit>`.
 
 The included `docker-compose.yml` is the recommended install path:
 
@@ -180,17 +233,17 @@ docker compose up -d
 docker compose logs -f freellmapi
 ```
 
-By default the container's port is bound to `127.0.0.1` (localhost only). To reach the dashboard/API from another machine on your network, publish it on all interfaces with `HOST_BIND=0.0.0.0 docker compose up -d` — only on a trusted LAN, since the proxy is single-user.
+By default the container's port binds to `127.0.0.1` (localhost only). To reach the dashboard/API from another machine, publish on all interfaces with `HOST_BIND=0.0.0.0 docker compose up -d` — only on a trusted LAN, since the proxy is single-user.
 
-SQLite data is stored in the `freellmapi-data` volume at `/app/server/data`. Keep the same `.env` `ENCRYPTION_KEY` and volume when upgrading, because provider keys are encrypted at rest.
+SQLite data lives in the `freellmapi-data` volume at `/app/server/data`. Keep the same `.env` `ENCRYPTION_KEY` and volume when upgrading, because provider keys are encrypted at rest.
 
 More Docker operations and examples live in [docker/README.md](./docker/README.md).
 
+---
+
 ## Desktop app
 
-A native menu-bar app lives in [`desktop/`](./desktop): the entire router +
-dashboard running locally from your tray, with a glass popover showing live
-request stats.
+A native menu-bar app lives in [`desktop/`](./desktop): the entire router + dashboard running locally from your tray, with a glass popover showing live request stats.
 
 ![FreeAIGateway desktop app](repo-assets/desktop.png)
 
@@ -202,17 +255,18 @@ npm run desktop:dist        # macOS: desktop/dist-electron/FreeAIGateway-…-arm
 npm run desktop:dist:win    # Windows installer
 ```
 
-> **Windows:** the build config is in place but not tested yet — if you try it,
-> a quick report (working or not) in an issue would be much appreciated.
+> **Windows:** the build config is in place but not yet tested — a quick report (working or not) in an issue would be much appreciated.
 
-Locally built apps launch without Gatekeeper/SmartScreen warnings — no code
-signing involved. Full instructions in [desktop/README.md](./desktop/README.md).
+Locally built apps launch without Gatekeeper/SmartScreen warnings — no code signing involved. Full instructions in [desktop/README.md](./desktop/README.md).
+
+---
 
 ## Using the API
 
-Any OpenAI-compatible client works. Examples:
+Any OpenAI-compatible client works — just change the `base_url`.
 
-**Python**
+<details open>
+<summary><b>OpenAI · Python</b></summary>
 
 ```python
 from openai import OpenAI
@@ -230,7 +284,10 @@ print(resp.choices[0].message.content)
 print("Routed via:", resp.headers.get("x-routed-via"))
 ```
 
-**curl**
+</details>
+
+<details>
+<summary><b>OpenAI · curl</b></summary>
 
 ```bash
 curl http://localhost:3001/v1/chat/completions \
@@ -242,7 +299,10 @@ curl http://localhost:3001/v1/chat/completions \
   }'
 ```
 
-**Streaming**
+</details>
+
+<details>
+<summary><b>OpenAI · streaming</b></summary>
 
 ```python
 stream = client.chat.completions.create(
@@ -254,11 +314,14 @@ for chunk in stream:
     print(chunk.choices[0].delta.content or "", end="", flush=True)
 ```
 
+</details>
+
 ### Anthropic-compatible endpoint
 
-The same server also speaks the native Anthropic Messages wire format at `POST /v1/messages`, so Claude-native clients work unchanged — just point the base URL at the gateway. The router still picks whichever free provider is available; the `model` field is accepted but real Claude ids fall through to auto-routing.
+The same server speaks the native Anthropic Messages wire format at `POST /v1/messages`, so Claude-native clients work unchanged — just point the base URL at the gateway. The router still picks whichever free provider is available; the `model` field is accepted but real Claude ids fall through to auto-routing.
 
-**Anthropic Python SDK**
+<details open>
+<summary><b>Anthropic Python SDK</b></summary>
 
 ```python
 from anthropic import Anthropic
@@ -276,7 +339,10 @@ msg = client.messages.create(
 print(msg.content[0].text)
 ```
 
-**Claude Code**
+</details>
+
+<details>
+<summary><b>Claude Code</b></summary>
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:3001"
@@ -284,7 +350,10 @@ export ANTHROPIC_API_KEY="freellmapi-your-unified-key"
 claude
 ```
 
-**curl**
+</details>
+
+<details>
+<summary><b>Anthropic · curl</b></summary>
 
 ```bash
 curl http://localhost:3001/v1/messages \
@@ -297,6 +366,8 @@ curl http://localhost:3001/v1/messages \
     "messages": [{"role": "user", "content": "hi"}]
   }'
 ```
+
+</details>
 
 Streaming (`"stream": true`) emits the full Anthropic SSE sequence — `message_start`, `content_block_start/delta/stop`, `message_delta`, `message_stop` — and tool use round-trips via `tool_use` / `tool_result` blocks. `POST /v1/messages/count_tokens` returns an `input_tokens` estimate for context sizing.
 
@@ -312,9 +383,9 @@ curl http://localhost:3001/v1/images/generations \
 
 Works with the OpenAI Images SDK (`client.images.generate(...)`). `size` maps to an aspect ratio, or pass `"aspect": "16:9" | "9:16" | "1:1"` directly; `"response_format": "b64_json"` inlines the bytes.
 
-**Tool calling**
+### Tool calling
 
-Pass OpenAI-style `tools` and `tool_choice`; the assistant response round-trips back through the proxy exactly like the OpenAI API. Multi-step flows (assistant `tool_calls` → `tool` role follow-up → final answer) work across every provider the router can reach.
+Pass OpenAI-style `tools` and `tool_choice`; the assistant response round-trips back through the proxy exactly like the OpenAI API. Multi-step flows (assistant `tool_calls` → `tool`-role follow-up → final answer) work across every provider the router can reach.
 
 ```python
 tools = [{
@@ -352,9 +423,11 @@ final = client.chat.completions.create(
 print(final.choices[0].message.content)
 ```
 
-**Vision / image input**
+Works with `stream=True` too — you'll get `delta.tool_calls` chunks followed by a `finish_reason: "tool_calls"` close. Under the hood, OpenAI-compatible providers get the request passed through; Gemini requests are translated into Google's `functionDeclarations` / `functionResponse` shape and back.
 
-Send images with the standard OpenAI `image_url` content blocks (base64 `data:` URLs or `http(s)` URLs). When a request contains an image, the router restricts itself to **vision-capable models** and ignores text-only ones. Vision models are tagged with a **Vision** badge on the Fallback Chain page; the current set includes Gemini (2.5 / 3.x), Llama 4 Scout/Maverick (Groq, NVIDIA, SambaNova), and GitHub's GPT-4o / GPT-4.1.
+### Vision / image input
+
+Send images with standard OpenAI `image_url` content blocks (base64 `data:` URLs or `http(s)` URLs). When a request contains an image, the router restricts itself to **vision-capable models** and ignores text-only ones (tagged with a **Vision** badge on the Fallback Chain page — currently Gemini 2.5/3.x, Llama 4 Scout/Maverick on Groq/NVIDIA/SambaNova, and GitHub's GPT-4o / GPT-4.1).
 
 ```python
 resp = client.chat.completions.create(
@@ -370,15 +443,13 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
-If no vision-capable model is enabled in your Fallback Chain, an image request returns a clear `422` (`code: "no_vision_model"`) rather than silently dropping the image. (Image input on `/v1/responses` isn't supported yet — use `/v1/chat/completions`.)
+If no vision-capable model is enabled, an image request returns a clear `422` (`code: "no_vision_model"`) rather than silently dropping the image. (Image input on `/v1/responses` isn't supported yet — use `/v1/chat/completions`.)
 
-Works with `stream=True` as well — you'll get `delta.tool_calls` chunks followed by a `finish_reason: "tool_calls"` close. Under the hood, OpenAI-compatible providers (Groq, Cerebras, SambaNova, Mistral, OpenRouter, GitHub Models, HuggingFace, Cloudflare, Cohere compat) get the request passed through; Gemini requests get translated into Google's `functionDeclarations` / `functionResponse` shape and the response is translated back.
-
-Every response carries an `X-Routed-Via: <platform>/<model>` header so you can see which provider actually served each call. If a request fell over between providers, you'll also see `X-Fallback-Attempts: N`.
+> Every response carries an `X-Routed-Via: <platform>/<model>` header so you can see which provider served each call. If a request fell over between providers, you'll also see `X-Fallback-Attempts: N`.
 
 ### Embeddings
 
-`/v1/embeddings` is OpenAI-compatible, with one deliberate difference from chat routing: **failover never crosses models.** Vectors from different models live in incompatible spaces — silently switching models would corrupt any vector store built on top of the proxy. So embeddings route by **family** (one model identity + dimension), and failover only walks the providers serving that same family.
+`/v1/embeddings` is OpenAI-compatible with one deliberate difference: **failover never crosses models.** Vectors from different models live in incompatible spaces — silently switching models would corrupt any vector store built on top. So embeddings route by **family** (one model identity + dimension), and failover only walks the providers serving that same family.
 
 ```python
 resp = client.embeddings.create(
@@ -387,15 +458,6 @@ resp = client.embeddings.create(
 )
 print(len(resp.data), "vectors of", len(resp.data[0].embedding), "dims")
 ```
-
-```bash
-curl http://localhost:3001/v1/embeddings \
-  -H "Authorization: Bearer freellmapi-your-unified-key" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "auto", "input": "hello world"}'
-```
-
-`model` accepts `auto` (the configured default family), a family name, or a provider-specific model id (which resolves to its family). Available families:
 
 | Family (`model`) | Dims | Providers (failover order) |
 | --- | --- | --- |
@@ -410,39 +472,48 @@ curl http://localhost:3001/v1/embeddings \
 | `llama-nemotron-embed-vl-1b-v2` | 2048 | NVIDIA → OpenRouter |
 | `embeddinggemma-300m` | 768 | Cloudflare |
 
-The default family, per-provider toggles, and priorities live on the dashboard's **Models → Embeddings** page. Pick your family once and stick with it for a given vector store — that's the whole point of the family model.
+`model` accepts `auto` (configured default), a family name, or a provider-specific model id (resolved to its family). Defaults and per-provider priorities live on the dashboard's **Models → Embeddings** page. Pick a family once and stick with it for a given vector store — that's the whole point.
+
+---
 
 ## Screenshots
 
-### Models & routing
+<table>
+<tr>
+<td width="50%" valign="top">
 
-Tune the routing strategy (or drag a manual fallback order), watch each model's live reliability / speed / intelligence scores, and track the per-provider monthly token budget.
+**Models & routing** — tune the routing strategy or drag a manual fallback order, watch live reliability / speed / intelligence scores, and track the per-provider monthly token budget.
 
 ![Models and fallback chain](repo-assets/fallback-chain.png)
 
-### Settings
+</td>
+<td width="50%" valign="top">
 
-Your unified key, the OpenAI **and** Anthropic connection endpoints, the prompt cache (toggle / TTL / live stats), and the built-in tools — all in one place.
+**Settings** — your unified key, the OpenAI **and** Anthropic endpoints, the prompt cache (toggle / TTL / live stats), and the built-in tools, all in one place.
 
 ![Settings page](repo-assets/settings.png)
 
-### Playground
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-A pro console: switch between the OpenAI and Anthropic protocols, stream responses, compare several models side by side, generate images, and read per-turn route / cache / latency / token badges.
+**Playground** — a pro console: switch between OpenAI and Anthropic protocols, stream responses, compare models side by side, generate images, and read per-turn route / cache / latency / token badges.
 
 ![Playground page](repo-assets/playground.png)
 
-### Analytics
+</td>
+<td width="50%" valign="top">
 
-Request volume, success rate, tokens, estimated savings, latency percentiles (p50/p95/p99 + TTFB), prompt-cache hit-rate, a per-model breakdown, and a live request log.
+**Analytics** — request volume, success rate, tokens, estimated savings, latency percentiles (p50/p95/p99 + TTFB), prompt-cache hit-rate, per-model breakdown, and a live request log.
 
 ![Analytics page](repo-assets/analytics.png)
 
-### Keys
+</td>
+</tr>
+</table>
 
-Manage provider credentials and grab the unified API key your apps connect with. Each key shows a status dot and when it was last health-checked.
-
-![Keys page](repo-assets/keys.png)
+---
 
 ## How it works
 
@@ -472,23 +543,29 @@ Manage provider credentials and grab the unified API key your apps connect with.
  Google         Groq        Cerebras           OpenRouter        HF       …10 more
 ```
 
-- **Router** (`server/src/services/router.ts`) — picks a model per request.
-- **Rate-limit ledger** (`server/src/services/ratelimit.ts`) — in-memory RPM/RPD/TPM/TPD counters backed by SQLite, with cooldowns on 429s.
-- **Provider adapters** (`server/src/providers/*.ts`) — one file per provider, implementing the `Provider` base class: `chatCompletion()` and `streamChatCompletion()`.
-- **Health service** (`server/src/services/health.ts`) — periodic probe keeps key status fresh.
-- **Dashboard** (`client/`) — React + Vite + shadcn/ui admin surface.
-- **Storage** — SQLite (`better-sqlite3`) with AES-256-GCM envelope encryption for keys.
+| Component | Path | Role |
+|---|---|---|
+| **Router** | `server/src/services/router.ts` | Picks a model per request |
+| **Rate-limit ledger** | `server/src/services/ratelimit.ts` | In-memory RPM/RPD/TPM/TPD counters backed by SQLite, with cooldowns on 429s |
+| **Provider adapters** | `server/src/providers/*.ts` | One file per provider implementing `chatCompletion()` and `streamChatCompletion()` |
+| **Health service** | `server/src/services/health.ts` | Periodic probe keeps key status fresh |
+| **Dashboard** | `client/` | React + Vite + shadcn/ui admin surface |
+| **Storage** | SQLite (`better-sqlite3`) | AES-256-GCM envelope encryption for keys |
+
+---
 
 ## Limitations
 
 Stacking free tiers has real trade-offs. Be honest with yourself about them:
 
-- **No frontier models.** The free-tier catalog tops out around Llama 3.3 70B, GLM-4.5, Qwen 3 Coder, and Gemini 2.5 Pro. You will not get GPT-5 or Claude Opus class reasoning through this. For hard problems, pay for a real API.
-- **Intelligence degrades as the day progresses.** Your top-ranked models (usually Gemini 2.5 Pro, GPT-4o via GitHub Models) have the lowest daily caps. Once they hit their limits, the router falls down your priority chain to smaller/weaker models. Expect the effective intelligence of the endpoint to drop in the late hours of each day — then reset at UTC midnight.
+- **No frontier models.** The free-tier catalog tops out around Llama 3.3 70B, GLM-4.5, Qwen 3 Coder, and Gemini 2.5 Pro. You will not get GPT-5 or Claude Opus-class reasoning through this. For hard problems, pay for a real API.
+- **Intelligence degrades through the day.** Your top-ranked models have the lowest daily caps; once they hit them, the router falls down the chain to smaller models. Expect effective intelligence to drop in the late hours of each day, then reset at UTC midnight.
 - **Latency is highly variable.** Cerebras and Groq are extremely fast; others are not. You get whichever one is available.
-- **Free tiers can change without notice.** Providers regularly tighten, loosen, or remove free tiers. When that happens you'll see 429s or auth errors until you update the catalog. Re-seed scripts live in `server/src/scripts/`.
+- **Free tiers change without notice.** Providers tighten, loosen, or remove free tiers regularly. When that happens you'll see 429s or auth errors until you update the catalog. Re-seed scripts live in `server/src/scripts/`.
 - **No SLA, by definition.** If you need reliability, use a paid provider with a contract.
-- **Local-first.** There's no multi-tenant auth. Run this for yourself; don't expose it to the internet.
+- **Local-first.** No multi-tenant auth. Run this for yourself; don't expose it to the internet.
+
+---
 
 ## Contributing
 
@@ -496,9 +573,9 @@ Contributors very welcome! Good first PRs:
 
 - **Add a provider** — copy `server/src/providers/openai-compat.ts` as a template, wire it into `server/src/providers/index.ts`, seed its models in `server/src/db/index.ts`, add a test in `server/src/__tests__/providers/`.
 - **Add an endpoint** — images, moderations, audio. The provider base class can grow new methods; adapters declare which they support.
-- **Improve the router** — cost-aware routing (cheapest-healthy-fastest tradeoffs), better latency-weighted priority, regional pinning.
-- **Dashboard polish** — charts on the Analytics page, key rotation UX, batch import of keys from `.env`.
-- **Docs** — more examples, client library snippets for Go/Rust/etc., a deployment recipe for Docker or Fly.
+- **Improve the router** — cost-aware routing, latency-weighted priority, regional pinning.
+- **Dashboard polish** — Analytics charts, key rotation UX, batch import of keys from `.env`.
+- **Docs** — more examples, client snippets for Go/Rust, deployment recipes.
 
 **Development loop:**
 
@@ -509,7 +586,7 @@ npm test         # server vitest; also runs client tests if the workspace adds t
 npm run build    # compile server and dashboard
 ```
 
-PRs should include a test, keep the existing test suite green, and match the `.editorconfig` / tsconfig defaults already in the repo. Issues and discussions are open.
+PRs should include a test, keep the suite green, and match the `.editorconfig` / tsconfig defaults already in the repo. Issues and discussions are open.
 
 ### Contributors
 
@@ -536,42 +613,57 @@ PRs should include a test, keep the existing test suite green, and match the `.e
 <a href="https://github.com/Tushar49"><img src="https://images.weserv.nl/?url=github.com/Tushar49.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@Tushar49" /></a>
 <a href="https://github.com/nicyoong"><img src="https://images.weserv.nl/?url=github.com/nicyoong.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@nicyoong" /></a>
 <a href="https://github.com/Aldo-f"><img src="https://images.weserv.nl/?url=github.com/Aldo-f.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@Aldo-f" /></a>
-<a href="https://github.com/Tazrif-Raim"><img src="https://images.weserv.nl/?url=github.com/Tazrif-Raim.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@Tazrif-Raim" /></a>
 <a href="https://github.com/m1nuzz"><img src="https://images.weserv.nl/?url=github.com/m1nuzz.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@m1nuzz" /></a>
 <a href="https://github.com/LoneRifle"><img src="https://images.weserv.nl/?url=github.com/LoneRifle.png&w=60&h=60&fit=cover&mask=circle" width="60" alt="@LoneRifle" /></a>
 
+---
+
 ## Terms of Service review
 
-A self-hosted, single-user, personal-use setup was re-reviewed against each provider's ToS (May 2026). Summary:
+A self-hosted, single-user, personal-use setup was re-reviewed against each provider's ToS (**May 2026**). Summary:
 
 | Provider | Verdict | Notes |
 |---|---|---|
-| Google Gemini | ⚠️ Caution | March 2026 ToS narrows scope to *"professional or business purposes, not for consumer use"* — a self-hosted developer proxy is still defensible, but the clause is new. |
+| Google Gemini | ⚠️ Caution | March 2026 ToS narrows scope to *"professional or business purposes, not for consumer use"* — a self-hosted dev proxy is still defensible, but the clause is new. |
 | Groq | ✅ Likely OK | GroqCloud Services Agreement permits Customer Application integration. |
 | Cerebras | ✅ Likely OK | Permitted; explicitly forbids selling/transferring API keys. |
 | Mistral | ✅ Likely OK | APIs allowed for personal/internal business use. |
-| OpenRouter | ✅ Likely OK | April 2026 ToS sharpens the no-resale / no-competing-service clause; private single-user proxy still fine. |
+| OpenRouter | ✅ Likely OK | April 2026 ToS sharpens the no-resale clause; private single-user proxy still fine. |
 | SambaNova | ⚠️ Ambiguous | EULA §1.5(c) blocks resale and "service bureau" use; single-user with no third-party access is fine. |
 | Cloudflare Workers AI | ⚠️ Ambiguous | No anti-proxy clause; covered by general Self-Serve Subscription Agreement. |
 | NVIDIA NIM | ⚠️ Caution | Trial ToS §1.2 / §1.4: *"evaluation only, not production."* Disabled in default catalog. |
 | GitHub Models | ⚠️ Caution | Free tier explicitly scoped to *"experimentation"* and *"prototyping."* |
 | Cohere | ❌ Avoid | Terms §14 still forbids *"personal, family or household purposes."* |
 | Zhipu (open.bigmodel.cn) | ✅ Likely OK | Personal/non-commercial research carve-out still in the platform docs. |
-| Z.ai (api.z.ai) | ⚠️ Caution | New row — Singapore entity (distinct from Zhipu CN). §III.3(l) anti-traffic-redirect clause could plausibly be read against a proxy; no explicit personal-use carve-out. |
-| Ollama Cloud | ✅ Likely OK | New row — Free plan permits cloud-model access (1 concurrent, 5-hour session caps). No anti-proxy / anti-resale clauses found. *(Integration tracked in #14.)* |
+| Z.ai (api.z.ai) | ⚠️ Caution | Singapore entity (distinct from Zhipu CN). §III.3(l) anti-traffic-redirect clause could be read against a proxy; no explicit personal-use carve-out. |
+| Ollama Cloud | ✅ Likely OK | Free plan permits cloud-model access (1 concurrent, 5-hour session caps). No anti-proxy / anti-resale clauses found. *(Integration tracked in #14.)* |
 
-Rules of thumb that keep most providers happy: **one account per provider**, **no reselling**, **no sharing your endpoint with other humans**, **don't hammer a free tier as a paid production backend**. This is informational, not legal advice — read each provider's ToS and make your own call.
+**Rules of thumb that keep most providers happy:** one account per provider · no reselling · no sharing your endpoint with other humans · don't hammer a free tier as a paid production backend. *This is informational, not legal advice — read each provider's ToS and make your own call.*
 
-Removed since the April 2026 review: Hugging Face, Moonshot, and MiniMax direct integrations were dropped from the catalog (HF — tool-call format issues; Moonshot — moved to paid only; MiniMax — superseded by the OpenRouter `minimax/minimax-m2.5:free` route).
+> Removed since the April 2026 review: Hugging Face, Moonshot, and MiniMax direct integrations were dropped (HF — tool-call format issues; Moonshot — paid only; MiniMax — superseded by the OpenRouter `minimax/minimax-m2.5:free` route).
+
+---
 
 ## Disclaimer
 
-**This project is for personal experimentation and learning, not production.** Free tiers exist so developers can prototype against them; they aren't a stable, supported inference substrate and shouldn't be treated as one. If you build something real on top of FreeAIGateway, swap in a paid API before you ship. Your relationship with each upstream provider is governed by the terms you accepted when you created your account — those terms still apply when the traffic is proxied through this project, and you're responsible for complying with them.
+**This project is for personal experimentation and learning, not production.** Free tiers exist so developers can prototype against them; they aren't a stable, supported inference substrate. If you build something real on top of FreeAIGateway, swap in a paid API before you ship. Your relationship with each upstream provider is governed by the terms you accepted when you created your account — those terms still apply when traffic is proxied through this project, and you're responsible for complying with them.
+
+---
 
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/chart?repos=Hansade2005/FreeAIGateway&type=date&legend=top-left)](https://www.star-history.com/?repos=Hansade2005%2FFreeAIGateway&type=date&legend=top-left)
 
+---
+
 ## License
 
-[MIT](./LICENSE)
+[MIT](./LICENSE) © [Hans Ade](https://github.com/Hansade2005)
+
+<div align="center">
+
+<br/>
+
+**If FreeAIGateway saves you a few API bills, consider leaving a ⭐ — it genuinely helps.**
+
+</div>
