@@ -19,14 +19,19 @@ function fakeRoute(provider: any) {
 async function post(app: Express, path: string, body: any, headers: Record<string, string> = {}) {
   const server = app.listen(0);
   const addr = server.address() as any;
-  const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-  });
-  const text = await res.text();
-  server.close();
-  return { status: res.status, text, contentType: res.headers.get('content-type') ?? '' };
+  try {
+    const res = await fetch(`http://127.0.0.1:${addr.port}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, text, contentType: res.headers.get('content-type') ?? '' };
+  } finally {
+    // Always close, even if fetch/res.text() throws — otherwise a failed
+    // request leaks the listener and the next test can't bind its port.
+    server.close();
+  }
 }
 
 describe('POST /v1/messages (Anthropic Messages API)', () => {
@@ -203,6 +208,36 @@ describe('POST /v1/messages (Anthropic Messages API)', () => {
     expect(text).toContain('"partial_json":"{\\"ci"');
     expect(text).toContain('"partial_json":"ty\\":\\"SF\\"}"');
     expect(text).toContain('"stop_reason":"tool_use"');
+  });
+
+  // Regression: some providers stream the tool name in a LATER chunk than the
+  // id/args. content_block_start must be deferred until the name is known —
+  // Anthropic's tool_use block requires a non-empty name — and the buffered arg
+  // fragment must be flushed once the start fires, never lost.
+  it('stream: defers content_block_start until the tool name arrives, then flushes buffered args', async () => {
+    mockRouteRequest.mockReturnValue(fakeRoute({
+      async chatCompletion() { throw new Error('nope'); },
+      async *streamChatCompletion() {
+        // first chunk: id + partial args, NO name
+        yield { id: 'c', object: 'chat.completion.chunk', created: 0, model: 'fake-model', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { arguments: '{"ci' } }] }, finish_reason: null }] };
+        // second chunk: the name finally arrives + rest of args
+        yield { id: 'c', object: 'chat.completion.chunk', created: 0, model: 'fake-model', choices: [{ index: 0, delta: { tool_calls: [{ index: 0, type: 'function', function: { name: 'get_weather', arguments: 'ty":"SF"}' } }] }, finish_reason: 'tool_calls' }] };
+      },
+    }));
+
+    const { text } = await post(app, '/v1/messages', {
+      messages: [{ role: 'user', content: 'weather?' }], max_tokens: 64, stream: true,
+      tools: [{ name: 'get_weather', input_schema: { type: 'object' } }],
+    }, auth(key));
+
+    // start carries the real name, never an empty one
+    expect(text).toContain('"type":"tool_use","id":"call_1","name":"get_weather"');
+    expect(text).not.toContain('"name":""');
+    // the buffered first fragment is flushed, and the second streams live
+    expect(text).toContain('"partial_json":"{\\"ci"');
+    expect(text).toContain('"partial_json":"ty\\":\\"SF\\"}"');
+    // content_block_start fires exactly once for the tool block
+    expect(text.split('"type":"content_block_start"').length - 1).toBe(1);
   });
 });
 

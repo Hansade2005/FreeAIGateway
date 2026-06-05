@@ -534,13 +534,20 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
         let blockIndex = -1;
         let textBlockOpen = false;
         let msgText = '';
-        // tool-call accumulator keyed by the provider's tool_call index
-        const toolAcc = new Map<number, { blockIndex: number; callId: string; name: string; args: string }>();
+        // tool-call accumulator keyed by the provider's tool_call index.
+        // `startSent` gates content_block_start: Anthropic's tool_use block
+        // requires a non-empty `name`, but some providers stream the name in a
+        // later chunk than the id — so we defer the start (buffering arg frags)
+        // until the name is known, then flush.
+        const toolAcc = new Map<number, { blockIndex: number; callId: string; name: string; args: string; startSent: boolean }>();
         let totalOutputTokens = 0;
 
         const gen = route.provider.streamChatCompletion(route.apiKey, messages, route.modelId, completionOpts);
 
         for await (const chunk of gen) {
+          // Client hung up — stop pulling from the upstream provider so we don't
+          // burn free-tier tokens/bandwidth generating into a dead socket.
+          if (res.destroyed) break;
           // LAZY header set — headers + the message_start frame go out only once
           // the provider actually streams a chunk, so a connect-time provider
           // error bubbles to the catch with streamStarted=false and takes the
@@ -588,32 +595,57 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
             const idx = (tc as any).index ?? 0;
             let acc = toolAcc.get(idx);
             if (!acc) {
+              blockIndex = blockIndex < 0 ? 0 : blockIndex + 1;
+              acc = { blockIndex, callId: tc.id || newId('toolu'), name: tc.function?.name ?? '', args: '', startSent: false };
+              toolAcc.set(idx, acc);
+            }
+            if (tc.function?.name && !acc.name) acc.name = tc.function.name;
+
+            // Emit content_block_start only once the name is known. Buffered arg
+            // frags (accumulated below before the name arrived) are flushed here.
+            if (acc.name && !acc.startSent) {
               // Close the text block before opening the first tool_use block —
               // Anthropic allows only one open content block at a time.
               if (textBlockOpen) {
                 sse('content_block_stop', { type: 'content_block_stop', index: 0 });
                 textBlockOpen = false;
               }
-              blockIndex = blockIndex < 0 ? 0 : blockIndex + 1;
-              acc = { blockIndex, callId: tc.id || newId('toolu'), name: tc.function?.name ?? '', args: '' };
-              toolAcc.set(idx, acc);
               sse('content_block_start', {
                 type: 'content_block_start',
                 index: acc.blockIndex,
                 content_block: { type: 'tool_use', id: acc.callId, name: acc.name, input: {} },
               });
+              acc.startSent = true;
+              if (acc.args) {
+                sse('content_block_delta', {
+                  type: 'content_block_delta',
+                  index: acc.blockIndex,
+                  delta: { type: 'input_json_delta', partial_json: acc.args },
+                });
+              }
             }
-            if (tc.function?.name && !acc.name) acc.name = tc.function.name;
+
             const argFrag = tc.function?.arguments ?? '';
             if (argFrag) {
               acc.args += argFrag;
-              sse('content_block_delta', {
-                type: 'content_block_delta',
-                index: acc.blockIndex,
-                delta: { type: 'input_json_delta', partial_json: argFrag },
-              });
+              // Already-started block → stream the frag live; otherwise it stays
+              // buffered in acc.args and is flushed when the start fires above.
+              if (acc.startSent) {
+                sse('content_block_delta', {
+                  type: 'content_block_delta',
+                  index: acc.blockIndex,
+                  delta: { type: 'input_json_delta', partial_json: argFrag },
+                });
+              }
             }
           }
+        }
+
+        // Client disconnected mid-stream — don't finalize/failover into a dead
+        // socket (and don't penalize the model: it's not a provider failure).
+        if (res.destroyed) {
+          logRequest(route.platform, route.modelId, route.keyId, 'error', estimatedInputTokens, totalOutputTokens, Date.now() - start, 'client disconnected');
+          return;
         }
 
         // Empty completion — provider returned 200 with no text AND no tool
@@ -633,17 +665,24 @@ anthropicRouter.post('/messages', async (req: Request, res: Response) => {
           sse('content_block_stop', { type: 'content_block_stop', index: 0 });
           textBlockOpen = false;
         }
-        // Close tool_use blocks. Arguments are repaired against the tool's
-        // parameter schema here (after the full string accumulated) — clients
-        // reconstruct input from the accumulated partial_json, but repairing
-        // double-encoded args keeps malformed-JSON tool calls from breaking the
-        // client's parse.
+        // Close tool_use blocks. Clients reconstruct `input` from the streamed
+        // partial_json frags, so nothing more to send but the stop. A block that
+        // never got its start (provider sent a tool_call delta but no name at
+        // all) is force-started here with the accumulated args so the event
+        // sequence stays well-formed — degenerate, but cheap insurance.
         const hadToolCalls = toolAcc.size > 0;
         for (const acc of toolAcc.values()) {
-          // repairToolArguments returns a (possibly) corrected JSON string; the
-          // partial_json deltas already sent the raw fragments, so we only need
-          // to emit the stop here.
-          repairToolArguments(acc.args, toolSchemas.get(acc.name));
+          if (!acc.startSent) {
+            sse('content_block_start', {
+              type: 'content_block_start',
+              index: acc.blockIndex,
+              content_block: { type: 'tool_use', id: acc.callId, name: acc.name || 'unknown', input: {} },
+            });
+            if (acc.args) {
+              sse('content_block_delta', { type: 'content_block_delta', index: acc.blockIndex, delta: { type: 'input_json_delta', partial_json: acc.args } });
+            }
+            acc.startSent = true;
+          }
           sse('content_block_stop', { type: 'content_block_stop', index: acc.blockIndex });
         }
 
