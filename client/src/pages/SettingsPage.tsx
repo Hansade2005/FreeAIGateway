@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Copy, Check, Eye, EyeOff, RefreshCw, KeyRound, Plug, ShieldAlert, Zap, Trash2 } from 'lucide-react'
+import { Copy, Check, Eye, EyeOff, RefreshCw, KeyRound, Plug, ShieldAlert, Zap, Trash2, Wrench, Search, FileText, Image } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -146,6 +146,66 @@ function ValueRow({ id, value, secret = false, copied, onCopy }: {
   )
 }
 
+interface ToolsState {
+  enabled: boolean
+  web_search: boolean
+  web_extract: boolean
+  generate_image: boolean
+}
+
+function ToolRow({ icon: Icon, name, desc, on, disabled, onToggle }: {
+  icon: typeof Search; name: string; desc: string; on: boolean; disabled: boolean; onToggle: (v: boolean) => void
+}) {
+  return (
+    <div className={`flex items-center gap-3 rounded-xl border bg-surface-2/50 px-3 py-2.5 transition-opacity ${disabled ? 'opacity-50' : ''}`}>
+      <span className="flex size-7 items-center justify-center rounded-lg bg-surface-3 text-muted-foreground"><Icon className="size-3.5" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="font-mono text-xs font-medium">{name}</div>
+        <div className="truncate text-[11px] text-muted-foreground">{desc}</div>
+      </div>
+      <Switch checked={on} disabled={disabled} onCheckedChange={onToggle} />
+    </div>
+  )
+}
+
+function ToolsCard() {
+  const queryClient = useQueryClient()
+  const { data } = useQuery<ToolsState>({
+    queryKey: ['tools'],
+    queryFn: () => apiFetch('/api/settings/tools'),
+  })
+  const patch = useMutation({
+    mutationFn: (body: Partial<ToolsState>) => apiFetch<ToolsState>('/api/settings/tools', { method: 'PATCH', body: JSON.stringify(body) }),
+    onSuccess: (res) => queryClient.setQueryData(['tools'], res),
+  })
+  const master = data?.enabled ?? false
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="flex size-8 items-center justify-center rounded-lg bg-signal-muted text-signal"><Wrench className="size-4" /></span>
+            <div>
+              <CardTitle>Built-in tools</CardTitle>
+              <CardDescription>Gateway-run tools that make plain auto-routed chat agentic — search the web, read pages, generate images.</CardDescription>
+            </div>
+          </div>
+          <Switch checked={master} onCheckedChange={(v: boolean) => patch.mutate({ enabled: v })} />
+        </div>
+      </CardHeader>
+      <CardContent className="grid gap-3 sm:grid-cols-3">
+        <ToolRow icon={Search} name="web_search" desc="Live web search" on={data?.web_search ?? false} disabled={!master} onToggle={(v) => patch.mutate({ web_search: v })} />
+        <ToolRow icon={FileText} name="web_extract" desc="Read a URL → markdown" on={data?.web_extract ?? false} disabled={!master} onToggle={(v) => patch.mutate({ web_extract: v })} />
+        <ToolRow icon={Image} name="generate_image" desc="Text → PNG (temp file)" on={data?.generate_image ?? false} disabled={!master} onToggle={(v) => patch.mutate({ generate_image: v })} />
+        <p className="text-xs text-muted-foreground sm:col-span-3">
+          Applied to auto-routed, tool-free chat completions; explicit model pins and client-supplied tools are untouched. Bypass per-request with <code className="font-mono">x-builtin-tools: off</code>.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 export default function SettingsPage() {
   const queryClient = useQueryClient()
   const { copied, copy } = useCopy()
@@ -213,6 +273,9 @@ export default function SettingsPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Built-in tools */}
+        <ToolsCard />
 
         {/* Prompt cache */}
         <CacheCard />

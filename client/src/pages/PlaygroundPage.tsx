@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Send, Trash2, Wrench, ImagePlus, X, Cpu, Zap, Clock, Gauge, Layers } from 'lucide-react'
+import { Send, Trash2, Wrench, ImagePlus, X, Cpu, Zap, Clock, Gauge, Layers, MessageSquare, Columns3, Image as ImageIcon, Sparkles } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -79,7 +79,7 @@ function MetaChip({ icon: Icon, children, accent }: { icon: typeof Zap; children
   )
 }
 
-export default function PlaygroundPage() {
+function ChatConsole() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -277,34 +277,28 @@ export default function PlaygroundPage() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-9rem)] flex-col">
-      <PageHeader
-        title="Playground"
-        description="Drive the gateway over either protocol — watch which provider serves each turn, and whether it hit the cache."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              value={protocol}
-              onChange={(v) => setProtocol(v as Protocol)}
-              options={[{ value: 'openai', label: 'OpenAI /v1' }, { value: 'anthropic', label: 'Anthropic /messages' }]}
-            />
-            <Select value={model} onValueChange={(v) => setModel(v ?? 'auto')}>
-              <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="auto">Auto (router picks)</SelectItem>
-                {availableModels.map((m) => (
-                  <SelectItem key={m.modelDbId} value={m.modelId}>
-                    <span className="flex items-center gap-2"><span>{m.displayName}</span><span className="text-xs text-muted-foreground">{m.platform}</span></span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {messages.length > 0 && (
-              <Button variant="outline" size="sm" onClick={() => setMessages([])}><Trash2 className="size-3.5" /> Clear</Button>
-            )}
-          </div>
-        }
-      />
+    <div className="flex h-[calc(100vh-13rem)] flex-col">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Segmented
+          value={protocol}
+          onChange={(v) => setProtocol(v as Protocol)}
+          options={[{ value: 'openai', label: 'OpenAI /v1' }, { value: 'anthropic', label: 'Anthropic /messages' }]}
+        />
+        <Select value={model} onValueChange={(v) => setModel(v ?? 'auto')}>
+          <SelectTrigger className="w-[220px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto (router picks)</SelectItem>
+            {availableModels.map((m) => (
+              <SelectItem key={m.modelDbId} value={m.modelId}>
+                <span className="flex items-center gap-2"><span>{m.displayName}</span><span className="text-xs text-muted-foreground">{m.platform}</span></span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {messages.length > 0 && (
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => setMessages([])}><Trash2 className="size-3.5" /> Clear</Button>
+        )}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border bg-card/70 backdrop-blur-sm">
         {/* transcript */}
@@ -437,4 +431,237 @@ function readHeaderMeta(res: Response, protocol: Protocol): TurnMeta {
     cache: res.headers.get('X-Cache') ?? undefined,
     fallbackAttempts: fb ? Number(fb) : undefined,
   }
+}
+
+function useGateway() {
+  const { data: keyData } = useQuery<{ apiKey: string }>({ queryKey: ['unified-key'], queryFn: () => apiFetch('/api/settings/api-key') })
+  const { data: fallbackEntries = [] } = useQuery<FallbackEntry[]>({ queryKey: ['fallback'], queryFn: () => apiFetch('/api/fallback') })
+  return { apiKey: keyData?.apiKey, models: fallbackEntries.filter((e) => e.keyCount > 0 && e.enabled) }
+}
+
+// ── Image generation console ────────────────────────────────────────────────
+function ImageConsole() {
+  const { apiKey } = useGateway()
+  const [prompt, setPrompt] = useState('')
+  const [aspect, setAspect] = useState('1:1')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [images, setImages] = useState<{ url: string; path?: string }[]>([])
+
+  async function generate() {
+    const p = prompt.trim()
+    if (!p || loading) return
+    setLoading(true); setError('')
+    try {
+      const res = await fetch(`${BASE}/v1/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+        body: JSON.stringify({ prompt: p, aspect }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error?.message ?? 'generation failed')
+      setImages((prev) => [...(data.data ?? []), ...prev])
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-3xl border bg-card/70 p-4 backdrop-blur-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="flex-1">
+            <label className="mb-1.5 block text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Prompt</label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generate() }}
+              placeholder="a bioluminescent jellyfish drifting over a neon reef, cinematic"
+              rows={2}
+              className="w-full resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/40"
+            />
+          </div>
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="mb-1.5 block text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Aspect</label>
+              <Segmented value={aspect} onChange={setAspect} options={[{ value: '1:1', label: '1:1' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' }]} />
+            </div>
+            <Button onClick={generate} disabled={loading || !prompt.trim()} className="bg-signal text-signal-foreground hover:bg-signal/90">
+              <Sparkles className="size-4" /> {loading ? 'Generating…' : 'Generate'}
+            </Button>
+          </div>
+        </div>
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        <p className="mt-2 text-[11px] text-muted-foreground">Powered by a0.dev · the PNG is saved to the server's temp folder and served back here.</p>
+      </div>
+
+      {images.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed py-20 text-center">
+          <span className="mb-3 flex size-12 items-center justify-center rounded-2xl bg-signal-muted text-signal"><ImageIcon className="size-6" /></span>
+          <p className="font-display text-lg font-semibold">Generate an image</p>
+          <p className="text-sm text-muted-foreground">Describe what you want to see, pick an aspect, and hit Generate.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {images.map((img, i) => (
+            <div key={i} className="animate-rise overflow-hidden rounded-2xl border bg-card">
+              <img src={img.url} alt="generated" className="aspect-square w-full bg-surface-2 object-cover" />
+              {img.path && (
+                <div className="truncate px-3 py-2 font-mono text-[10px] text-muted-foreground" title={img.path}>{img.path}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Multi-model compare console ─────────────────────────────────────────────
+interface CompareResult { loading: boolean; content?: string; error?: string; meta?: TurnMeta }
+
+function CompareConsole() {
+  const { apiKey, models } = useGateway()
+  const [selected, setSelected] = useState<string[]>([])
+  const [prompt, setPrompt] = useState('')
+  const [results, setResults] = useState<Record<string, CompareResult>>({})
+  const [running, setRunning] = useState(false)
+
+  // Default to the first 2 enabled models once they load.
+  useEffect(() => {
+    if (selected.length === 0 && models.length > 0) setSelected(models.slice(0, 2).map((m) => m.modelId))
+  }, [models, selected.length])
+
+  function toggle(modelId: string) {
+    setSelected((prev) => prev.includes(modelId) ? prev.filter((m) => m !== modelId) : prev.length >= 3 ? prev : [...prev, modelId])
+  }
+
+  async function run() {
+    const p = prompt.trim()
+    if (!p || running || selected.length === 0) return
+    setRunning(true)
+    setResults(Object.fromEntries(selected.map((m) => [m, { loading: true }])))
+    await Promise.all(selected.map(async (modelId) => {
+      const start = Date.now()
+      try {
+        const res = await fetch(`${BASE}/v1/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+          body: JSON.stringify({ model: modelId, messages: [{ role: 'user', content: p }] }),
+        })
+        const meta = readHeaderMeta(res, 'openai'); meta.latency = Date.now() - start
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error?.message ?? `HTTP ${res.status}`)
+        meta.inputTokens = data.usage?.prompt_tokens; meta.outputTokens = data.usage?.completion_tokens
+        setResults((prev) => ({ ...prev, [modelId]: { loading: false, content: data.choices?.[0]?.message?.content ?? '', meta } }))
+      } catch (e: any) {
+        setResults((prev) => ({ ...prev, [modelId]: { loading: false, error: e.message } }))
+      }
+    }))
+    setRunning(false)
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-3xl border bg-card/70 p-4 backdrop-blur-sm">
+        <label className="mb-2 block text-[11px] font-mono uppercase tracking-wider text-muted-foreground">Models (pick up to 3)</label>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {models.map((m) => {
+            const on = selected.includes(m.modelId)
+            return (
+              <button
+                key={m.modelDbId}
+                onClick={() => toggle(m.modelId)}
+                className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${on ? 'border-signal/50 bg-signal-muted text-signal' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {m.displayName}
+              </button>
+            )
+          })}
+          {models.length === 0 && <p className="text-sm text-muted-foreground">No models available — add a key on the Keys page.</p>}
+        </div>
+        <div className="flex items-end gap-2">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run() } }}
+            placeholder="One prompt, sent to every selected model in parallel…"
+            rows={1}
+            className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/40"
+          />
+          <Button onClick={run} disabled={running || !prompt.trim() || selected.length === 0}>
+            <Columns3 className="size-4" /> {running ? 'Running…' : 'Compare'}
+          </Button>
+        </div>
+      </div>
+
+      {selected.length > 0 && Object.keys(results).length > 0 && (
+        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(selected.length, 3)}, minmax(0, 1fr))` }}>
+          {selected.map((modelId) => {
+            const r = results[modelId]
+            const label = models.find((m) => m.modelId === modelId)?.displayName ?? modelId
+            return (
+              <div key={modelId} className="flex flex-col overflow-hidden rounded-2xl border bg-card">
+                <div className="border-b px-3 py-2 text-xs font-medium">{label}</div>
+                <div className="min-h-[160px] flex-1 p-3 text-sm">
+                  {!r || r.loading ? (
+                    <div className="flex gap-1 pt-2">{[0, 150, 300].map((d) => <span key={d} className="size-1.5 animate-bounce rounded-full bg-signal/70" style={{ animationDelay: `${d}ms` }} />)}</div>
+                  ) : r.error ? (
+                    <p className="text-xs text-destructive">{r.error}</p>
+                  ) : (
+                    <Markdown>{r.content ?? ''}</Markdown>
+                  )}
+                </div>
+                {r?.meta && (
+                  <div className="flex flex-wrap gap-1.5 border-t px-3 py-2">
+                    {r.meta.cache && <MetaChip icon={Zap} accent={r.meta.cache === 'HIT'}>cache {r.meta.cache}</MetaChip>}
+                    {r.meta.latency != null && <MetaChip icon={Clock}>{r.meta.latency} ms</MetaChip>}
+                    {(r.meta.inputTokens != null || r.meta.outputTokens != null) && <MetaChip icon={Cpu}>{r.meta.inputTokens ?? '?'}→{r.meta.outputTokens ?? '?'}</MetaChip>}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+type Mode = 'chat' | 'compare' | 'image'
+
+export default function PlaygroundPage() {
+  const [mode, setMode] = useState<Mode>('chat')
+  const description = mode === 'chat'
+    ? 'Drive the gateway over either protocol — watch which provider serves each turn, and whether it hit the cache.'
+    : mode === 'compare'
+      ? 'Send one prompt to several models at once and compare answers, latency, and cost.'
+      : 'Generate images through the gateway — saved to the server and shown here.'
+
+  return (
+    <div>
+      <PageHeader
+        title="Playground"
+        description={description}
+        actions={
+          <div className="inline-flex rounded-lg border bg-surface-2/60 p-0.5">
+            {([['chat', 'Chat', MessageSquare], ['compare', 'Compare', Columns3], ['image', 'Image', ImageIcon]] as const).map(([m, label, Icon]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${mode === m ? 'bg-signal text-signal-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                <Icon className="size-3.5" /> {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
+      {mode === 'chat' && <ChatConsole />}
+      {mode === 'compare' && <CompareConsole />}
+      {mode === 'image' && <ImageConsole />}
+    </div>
+  )
 }
