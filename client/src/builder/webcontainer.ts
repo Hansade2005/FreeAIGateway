@@ -57,7 +57,9 @@ export class Workspace {
   private async install(): Promise<void> {
     if (!this.wc) return
     this.setStatus('installing')
-    const proc = await this.wc.spawn('npm', ['install'])
+    // --no-audit/--no-fund skip extra network round-trips; --prefer-offline reuses
+    // any cached tarballs. The template ships a lockfile so resolution is skipped.
+    const proc = await this.wc.spawn('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline'])
     this.pipe(proc)
     const code = await proc.exit
     if (code !== 0) { this.setStatus('error'); throw new Error(`npm install failed (exit ${code})`) }
