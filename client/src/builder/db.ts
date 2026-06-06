@@ -8,6 +8,7 @@ export interface Project {
   id: string
   name: string
   files: Record<string, string>
+  assets?: Record<string, Uint8Array> // generated binary assets (images)
   createdAt: number
   updatedAt: number
 }
@@ -45,6 +46,10 @@ export async function createProject(name: string, files: Record<string, string>)
 
 export async function saveFiles(id: string, files: Record<string, string>): Promise<void> {
   await db.projects.update(id, { files, updatedAt: Date.now() })
+}
+
+export async function saveAssets(id: string, assets: Record<string, Uint8Array>): Promise<void> {
+  await db.projects.update(id, { assets, updatedAt: Date.now() })
 }
 
 export async function renameProject(id: string, name: string): Promise<void> {
