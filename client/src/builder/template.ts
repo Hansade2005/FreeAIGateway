@@ -1,4 +1,5 @@
 import type { FileSystemTree } from '@webcontainer/api'
+import { PACKAGE_LOCK } from './template-lock'
 
 // The starter project the agent edits: Vite + React 18 + Tailwind v4. Kept
 // deliberately small so free models can reason over the whole thing. The agent
@@ -85,6 +86,8 @@ createRoot(document.getElementById('root')).render(
   )
 }
 `,
+  // Pinned lockfile so the in-browser `npm install` skips dependency resolution.
+  'package-lock.json': PACKAGE_LOCK,
 }
 
 // Convert the flat path→content map into the nested tree WebContainer.mount wants.
