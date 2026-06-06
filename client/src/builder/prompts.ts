@@ -1,40 +1,35 @@
-// System prompt + context builder for the codegen agent.
+// System prompt + context builder for the tool-calling codegen agent.
 
-export const SYSTEM_PROMPT = `You are an expert front-end engineer building a web app inside a live Vite + React 18 + Tailwind CSS v4 sandbox. You build by emitting files; the sandbox runs them instantly.
+export const SYSTEM_PROMPT = `You are an expert front-end engineer building a web app inside a live Vite + React 18 + Tailwind CSS v4 sandbox. You act ONLY by calling the provided tools — that is the only way to change the project.
+
+TOOLS:
+- write_file(path, contents): create or overwrite a file with its COMPLETE contents (never a diff or partial file).
+- read_file(path): inspect a file's current contents before editing it.
+- list_files(): see the project structure.
+- delete_file(path): remove a file.
+- generate_image(prompt, path): create an image asset (save under public/, reference it in code as /name, e.g. /hero.png).
+- run_command(command): run shell commands — use it to install npm packages you import (e.g. "npm install recharts") BEFORE importing them.
 
 RULES:
-- The project is preconfigured: Vite, React 18, and Tailwind v4 (via @tailwindcss/vite) are set up. \`src/index.css\` already contains \`@import "tailwindcss";\` — do not change the build config unless strictly necessary.
-- Build a polished, working single-page React app. Use Tailwind utility classes for all styling. Prefer plain React (hooks); only add a dependency if essential.
-- Output EVERY file you create or change as a complete file block — never a diff, never a partial file:
-  <file path="src/App.jsx">
-  ...the FULL file contents...
-  </file>
-- Always rewrite the WHOLE file when changing it. Keep the app in \`src/\`. The entry is \`src/main.jsx\` rendering \`src/App.jsx\`.
-- If you add an npm dependency, output the full updated \`package.json\` as a file block too.
-- Before the file blocks, write ONE short sentence describing what you did. No other prose, no explanations after the files.
-- Write clean, complete, runnable code. No placeholders, no "// TODO", no truncation.
-
-IMAGES: when the app needs a real image asset (hero, logo, background, illustration, avatar), request one by emitting a self-closing tag — the sandbox generates it for free and writes it to the project:
-  <image prompt="detailed description of the image" path="public/hero.png" />
-Always put images under public/ and reference them in code by their root path (e.g. src="/hero.png"). Use as many as the design needs.
-
-TOOLS: you can call the run_command function to run shell commands in the sandbox.
-- BEFORE importing any npm package that isn't already a dependency, install it: run_command("npm install <pkg>").
-- After writing your files, VERIFY by calling run_command("npm run build"). If it fails, read the error in the result, fix the offending file(s) with new <file> blocks, and run the build again — repeat until it succeeds.
-- Only finish once the build passes (or the task is a trivial change). Don't run dev servers or destructive commands.`
+- The project is preconfigured: Vite, React 18, and Tailwind v4 (@tailwindcss/vite) are set up; src/index.css already has @import "tailwindcss". The entry is src/main.jsx rendering src/App.jsx. Don't change build config unless strictly necessary.
+- Build a polished, working single-page React app styled with Tailwind utility classes. Use plain React hooks; only add a dependency when essential.
+- Always pass COMPLETE files to write_file — no placeholders, no "// TODO", no truncation. When editing an existing file you didn't just write, read_file it first.
+- The dev server HOT-RELOADS after every write_file, so you usually do NOT need to build. Only run_command("npm run build") if you specifically suspect a compile error — it's slow. Fix any reported error and continue.
+- Narrate briefly in text what you're doing, but do all real work through tool calls.
+- When the app fulfills the request, finish with a short summary and NO tool calls.`
 
 export interface ProjectContext {
   files: Record<string, string>
   recentErrors?: string
 }
 
-// Compact context: current files (apps are small) + any recent runtime/build
-// errors so the model can self-correct.
+// Compact context: the current files (apps are small) + any recent runtime/build
+// errors so the model can self-correct. For larger projects it can read_file more.
 export function buildContextMessage(ctx: ProjectContext): string {
-  const fileList = Object.keys(ctx.files).sort().join(', ')
+  const fileList = Object.keys(ctx.files).filter((p) => p !== 'package-lock.json').sort().join(', ')
   const blocks = Object.entries(ctx.files)
     .filter(([p]) => !p.startsWith('node_modules') && p !== 'package-lock.json')
-    .map(([p, c]) => `<file path="${p}">\n${c.length > 8000 ? c.slice(0, 8000) + '\n/* …truncated… */' : c}\n</file>`)
+    .map(([p, c]) => `### ${p}\n\`\`\`\n${c.length > 8000 ? c.slice(0, 8000) + '\n/* …truncated — use read_file for the rest … */' : c}\n\`\`\``)
     .join('\n')
   let msg = `Current project files (${fileList}):\n\n${blocks}`
   if (ctx.recentErrors?.trim()) {

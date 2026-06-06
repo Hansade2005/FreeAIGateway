@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, Image as ImageIcon, Loader2, TerminalSquare } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
-import { parseImages, parseActions, inProgressFile } from './parse'
 import { CodeView } from './CodeView'
 import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
 import {
-  type Project, type Message,
+  type Project, type Message, type StoredAction,
   createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages,
 } from './db'
 
@@ -28,6 +27,7 @@ export function Builder() {
   const [model, setModel] = useState('auto')
   const [tab, setTab] = useState<'preview' | 'code'>('preview')
   const [selected, setSelected] = useState('src/App.jsx')
+  const [writing, setWriting] = useState('')
   const [fatal, setFatal] = useState('')
 
   const ws = useRef<Workspace | null>(null)
@@ -95,27 +95,12 @@ export function Builder() {
     }
   }
 
-  // Generate the images the agent requested (<image> tags) and write them in.
-  async function processImages(text: string) {
-    const imgs = parseImages(text)
-    if (!imgs.length || !project) return
-    for (const im of imgs) {
-      try {
-        setStatus('starting')
-        const bytes = await generateImageBytes(im.prompt)
-        assetsRef.current = { ...assetsRef.current, [im.path]: bytes }
-        await ws.current?.writeBinary(im.path, bytes)
-      } catch { /* skip a failed asset */ }
-    }
-    await saveAssets(project.id, assetsRef.current)
-    setStatus('ready')
-  }
-
-  function setAssistant(update: (prev: string) => string) {
+  // Update the streaming assistant message's content / actions in place.
+  function patchAssistant(patch: (m: Message) => Message) {
     setMessages((ms) => {
       const copy = ms.slice()
       const last = copy[copy.length - 1]
-      if (last && last.role === 'assistant') copy[copy.length - 1] = { ...last, content: update(last.content) }
+      if (last && last.role === 'assistant') copy[copy.length - 1] = patch(last)
       return copy
     })
   }
@@ -125,15 +110,16 @@ export function Builder() {
     if (!prompt || running || !project || status !== 'ready') return
     setInput('')
     setRunning(true)
+    setWriting('')
     const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, createdAt: Date.now() }
-    setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', createdAt: Date.now() }])
+    setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], createdAt: Date.now() }])
     await addMessage({ projectId: project.id, role: 'user', content: prompt })
 
     const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
-    const writtenPaths: string[] = []
     const recentErrors = errors
     setErrors('')
-    let assistantText = ''
+    let content = ''
+    const acts: StoredAction[] = []
 
     sub.current = runAgent({
       history,
@@ -142,36 +128,49 @@ export function Builder() {
       recentErrors,
       model,
       fallbackModel: model === BUILDER_PRIMARY_MODEL ? 'auto' : null,
-      runCommand: async (command) => {
-        // package.json may change (npm install) → reflect it in the file view.
-        const r = (await ws.current?.exec(command)) ?? { output: 'sandbox not ready', exitCode: -1 }
-        const pkg = await ws.current?.readFile('package.json')
-        if (pkg) { filesRef.current = { ...filesRef.current, 'package.json': pkg }; setFiles(filesRef.current) }
-        return r
+      exec: {
+        writeFile: async (path, c) => {
+          filesRef.current = { ...filesRef.current, [path]: c }
+          setFiles(filesRef.current)
+          await ws.current?.writeFile(path, c)
+        },
+        readFile: async (path) => filesRef.current[path] ?? (await ws.current?.readFile(path)) ?? null,
+        listFiles: () => Object.keys(filesRef.current),
+        deleteFile: async (path) => {
+          const f = { ...filesRef.current }; delete f[path]; filesRef.current = f; setFiles(f)
+          await ws.current?.deleteFile(path)
+        },
+        generateImage: async (p, path) => {
+          const bytes = await generateImageBytes(p)
+          assetsRef.current = { ...assetsRef.current, [path]: bytes }
+          await ws.current?.writeBinary(path, bytes)
+          if (project) await saveAssets(project.id, assetsRef.current)
+        },
+        runCommand: async (command) => {
+          const r = (await ws.current?.exec(command)) ?? { output: 'sandbox not ready', exitCode: -1 }
+          const pkg = await ws.current?.readFile('package.json')
+          if (pkg) { filesRef.current = { ...filesRef.current, 'package.json': pkg }; setFiles(filesRef.current) }
+          return r
+        },
       },
     }).subscribe({
       next: (ev) => {
-        if (ev.type === 'delta') { assistantText += ev.delta; setAssistant((p) => p + ev.delta) }
-        else if (ev.type === 'file') {
-          filesRef.current = { ...filesRef.current, [ev.path]: ev.contents }
-          setFiles(filesRef.current)
-          setSelected(ev.path)
-          if (!writtenPaths.includes(ev.path)) writtenPaths.push(ev.path)
-          ws.current?.writeFile(ev.path, ev.contents).catch(() => {})
+        if (ev.type === 'delta') { content += ev.delta; patchAssistant((m) => ({ ...m, content: m.content + ev.delta })) }
+        else if (ev.type === 'writing') setWriting(ev.path)
+        else if (ev.type === 'fileWritten') setSelected(ev.path)
+        else if (ev.type === 'action') {
+          acts.push(ev.action)
+          patchAssistant((m) => ({ ...m, actions: [...acts] }))
+          setWriting((w) => (w === ev.action.path ? '' : w))
         } else if (ev.type === 'error') {
-          assistantText += `\n\n⚠️ ${ev.message}`
-          setAssistant((p) => p + `\n\n⚠️ ${ev.message}`)
+          content += `\n\n⚠️ ${ev.message}`
+          patchAssistant((m) => ({ ...m, content: m.content + `\n\n⚠️ ${ev.message}` }))
         }
       },
       complete: async () => {
-        if (assistantText.trim()) await addMessage({ projectId: project.id, role: 'assistant', content: assistantText })
+        setWriting('')
+        if (content.trim() || acts.length) await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts })
         await saveFiles(project.id, filesRef.current)
-        if (writtenPaths.includes('package.json')) {
-          setStatus('installing')
-          await ws.current?.reinstall().catch(() => {})
-          setStatus('ready')
-        }
-        await processImages(assistantText)
         setRunning(false)
       },
     })
@@ -271,32 +270,16 @@ export function Builder() {
               )}
               {messages.map((m, i) => {
                 const isLast = i === messages.length - 1
-                const prose = stripFileBlocks(m.content)
-                const actions = m.role === 'assistant' ? parseActions(m.content) : []
-                const writing = m.role === 'assistant' && running && isLast ? inProgressFile(m.content) : null
+                const actions = m.actions ?? []
+                const showWriting = m.role === 'assistant' && running && isLast && writing
                 return (
                   <div key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
                     <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                    <div className="whitespace-pre-wrap break-words">{prose || (running && isLast && actions.length === 0 && !writing ? 'Thinking…' : '')}</div>
-                    {(actions.length > 0 || writing) && (
+                    <div className="whitespace-pre-wrap break-words">{m.content || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>
+                    {(actions.length > 0 || showWriting) && (
                       <div className="mt-2 flex flex-col gap-1">
-                        {actions.map((a, j) => a.kind === 'command' ? (
-                          <span key={j} className="flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px] text-muted-foreground">
-                            <TerminalSquare className="size-3 text-signal" />
-                            <span className="truncate">$ {a.path}</span>
-                          </span>
-                        ) : (
-                          <button
-                            key={j}
-                            onClick={() => { setSelected(a.path); setTab('code') }}
-                            className="flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"
-                            title="Open in Code"
-                          >
-                            {a.kind === 'image' ? <ImageIcon className="size-3 text-signal" /> : <FileText className="size-3 text-signal" />}
-                            <span className="truncate">{a.kind === 'image' ? 'generated' : 'wrote'} {a.path}</span>
-                          </button>
-                        ))}
-                        {writing && (
+                        {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={(p) => { setSelected(p); setTab('code') }} />)}
+                        {showWriting && (
                           <span className="flex items-center gap-1.5 self-start rounded-md border border-signal/40 bg-signal-muted px-2 py-1 font-mono text-[11px] text-signal">
                             <Loader2 className="size-3 animate-spin" /> writing {writing}…
                           </span>
@@ -379,12 +362,21 @@ export function Builder() {
   )
 }
 
-// Hide raw <file> blocks from the chat bubble (the code lands in the preview/files).
-function stripFileBlocks(text: string): string {
-  return text
-    .replace(/<file[\s\S]*?<\/file>/gi, '')
-    .replace(/<file[\s\S]*$/i, '')
-    .replace(/<image\s+[^>]*?\/?>/gi, '')
-    .replace(/<cmd>[\s\S]*?<\/cmd>/gi, '')
-    .trim()
+// A single agent action rendered as an inline pill. File/image/delete pills open
+// the target in the Code tab; command/read/list are informational.
+function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: string) => void }) {
+  const base = 'flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px]'
+  if (action.kind === 'command') {
+    return <span className={`${base} text-muted-foreground`}><TerminalSquare className="size-3 text-signal" /><span className="truncate">$ {action.label.replace(/^\$ /, '')}</span></span>
+  }
+  if (action.kind === 'read' || action.kind === 'list') {
+    return <span className={`${base} text-muted-foreground/60`}><FileSearch className="size-3" /><span className="truncate">{action.label}</span></span>
+  }
+  const Icon = action.kind === 'image' ? ImageIcon : action.kind === 'delete' ? Trash2 : FileText
+  return (
+    <button onClick={() => action.path && onOpen(action.path)} className={`${base} text-muted-foreground hover:text-foreground`} title="Open in Code">
+      <Icon className={`size-3 ${action.kind === 'delete' ? 'text-destructive' : 'text-signal'}`} />
+      <span className="truncate">{action.label}</span>
+    </button>
+  )
 }

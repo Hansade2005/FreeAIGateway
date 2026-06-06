@@ -26,24 +26,26 @@ export async function getUnifiedKey(): Promise<string> {
 export interface StreamHandle { signal?: AbortSignal }
 export interface StreamResult { text: string; toolCalls: ToolCall[]; model: string }
 
-// Stream a chat completion: invokes onToken for each content delta, accumulates
-// any tool calls, and returns both. Tries `model`, falling back to
-// `fallbackModel` (kilo-auto/free → auto) on failure.
-export async function streamChat(
-  messages: ChatMsg[],
-  model: string,
-  fallbackModel: string | null,
-  onToken: (delta: string) => void,
-  tools?: ToolDef[],
-  handle?: StreamHandle,
-): Promise<StreamResult> {
+export interface StreamOpts {
+  model: string
+  fallbackModel: string | null
+  tools?: ToolDef[]
+  onToken: (delta: string) => void
+  onTool?: (calls: ToolCall[]) => void // called as tool-call args stream in
+  signal?: AbortSignal
+}
+
+// Stream a chat completion: invokes onToken for content deltas, onTool as tool
+// calls assemble, and returns the final text + tool calls. Tries `model`,
+// falling back to `fallbackModel` (kilo-auto/free → auto) on failure.
+export async function streamChat(messages: ChatMsg[], opts: StreamOpts): Promise<StreamResult> {
   try {
-    const r = await once(messages, model, onToken, tools, handle)
-    return { ...r, model }
+    const r = await once(messages, opts.model, opts)
+    return { ...r, model: opts.model }
   } catch (e) {
-    if (fallbackModel && fallbackModel !== model && !handle?.signal?.aborted) {
-      const r = await once(messages, fallbackModel, onToken, tools, handle)
-      return { ...r, model: fallbackModel }
+    if (opts.fallbackModel && opts.fallbackModel !== opts.model && !opts.signal?.aborted) {
+      const r = await once(messages, opts.fallbackModel, opts)
+      return { ...r, model: opts.fallbackModel }
     }
     throw e
   }
@@ -69,22 +71,21 @@ export async function generateImageBytes(prompt: string): Promise<Uint8Array> {
 async function once(
   messages: ChatMsg[],
   model: string,
-  onToken: (d: string) => void,
-  tools: ToolDef[] | undefined,
-  handle?: StreamHandle,
+  opts: StreamOpts,
 ): Promise<{ text: string; toolCalls: ToolCall[] }> {
   const key = await getUnifiedKey()
+  const tools = opts.tools
   const body = JSON.stringify({ model, stream: true, messages, temperature: 0.3, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}) })
   // Retry transient failures (rate limit / 5xx) on the same model before the
   // caller falls back to `auto`. Free tiers (Kilo 200/hr) hit 429 under load.
   let res: Response | null = null
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (handle?.signal?.aborted) throw new Error('aborted')
+    if (opts.signal?.aborted) throw new Error('aborted')
     res = await fetch('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body,
-      signal: handle?.signal,
+      signal: opts.signal,
     })
     if (res.ok && res.body) break
     if ((res.status === 429 || res.status >= 500) && attempt < 2) {
@@ -102,6 +103,7 @@ async function once(
   let buf = ''
   let full = ''
   const tcAcc: Record<number, ToolCall> = {} // assemble streamed tool-call deltas by index
+  const ordered = () => Object.keys(tcAcc).sort((a, b) => +a - +b).map((k) => tcAcc[+k])
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -115,7 +117,7 @@ async function once(
       if (data === '[DONE]') continue
       try {
         const delta = JSON.parse(data).choices?.[0]?.delta
-        if (delta?.content) { full += delta.content; onToken(delta.content) }
+        if (delta?.content) { full += delta.content; opts.onToken(delta.content) }
         if (delta?.tool_calls) {
           for (const d of delta.tool_calls) {
             const i = d.index ?? 0
@@ -124,10 +126,11 @@ async function once(
             if (d.function?.name) tcAcc[i].function.name += d.function.name
             if (d.function?.arguments) tcAcc[i].function.arguments += d.function.arguments
           }
+          opts.onTool?.(ordered())
         }
       } catch { /* ignore keepalive / partial */ }
     }
   }
-  const toolCalls = Object.keys(tcAcc).sort((a, b) => +a - +b).map((k) => tcAcc[+k]).filter((c) => c.function.name)
+  const toolCalls = ordered().filter((c) => c.function.name)
   return { text: full, toolCalls }
 }

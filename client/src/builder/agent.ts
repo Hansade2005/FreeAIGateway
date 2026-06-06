@@ -1,29 +1,40 @@
 import { Observable } from 'rxjs'
-import { streamChat, type ChatMsg, type ToolDef } from './gateway'
+import { streamChat, type ChatMsg, type ToolDef, type ToolCall } from './gateway'
 import { SYSTEM_PROMPT, buildContextMessage } from './prompts'
-import { parseFiles } from './parse'
 
-// Real function tools the agent can call, executed client-side against the
-// WebContainer. run_command unlocks the self-verifying loop: install deps, run
-// `npm run build`, read the error, fix, rebuild — until it's green.
+// The builder agent is a pure function-calling agent: it reads/writes files,
+// generates images, and runs commands via real tools, executed client-side
+// against the WebContainer. No tag parsing.
+
 export const BUILDER_TOOLS: ToolDef[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'run_command',
-      description: 'Run a shell command in the project sandbox and get back its combined output + exit code. Use it to install npm packages you import (e.g. "npm install recharts") BEFORE using them, and to run "npm run build" to verify the app compiles. If a build fails, read the error, fix the files, and run the build again.',
-      parameters: { type: 'object', properties: { command: { type: 'string', description: 'the shell command, e.g. "npm install recharts"' } }, required: ['command'] },
-    },
-  },
+  { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file with the full contents. Always pass the COMPLETE file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'project-relative path, e.g. src/App.jsx' }, contents: { type: 'string', description: 'the full file contents' } }, required: ['path', 'contents'] } } },
+  { type: 'function', function: { name: 'read_file', description: 'Read a file to inspect its current contents before editing.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'list_files', description: 'List all files in the project.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'delete_file', description: 'Delete a file from the project.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+  { type: 'function', function: { name: 'generate_image', description: 'Generate an image asset from a text prompt and save it (use public/ paths, reference as /name in code).', parameters: { type: 'object', properties: { prompt: { type: 'string' }, path: { type: 'string', description: 'e.g. public/hero.png' } }, required: ['prompt', 'path'] } } },
+  { type: 'function', function: { name: 'run_command', description: 'Run a shell command (e.g. "npm install recharts"). Prefer the dev server\'s live errors over full rebuilds; only run "npm run build" when you specifically need a production build check.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
 ]
+
+export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list'
+export interface AgentAction { kind: ActionKind; label: string; path?: string }
 
 export type AgentEvent =
   | { type: 'status'; status: string }
   | { type: 'delta'; delta: string }
-  | { type: 'file'; path: string; contents: string }
-  | { type: 'command'; command: string }
+  | { type: 'writing'; path: string }
+  | { type: 'action'; action: AgentAction }
+  | { type: 'fileWritten'; path: string; contents: string }
   | { type: 'done'; model: string }
   | { type: 'error'; message: string }
+
+export interface Executors {
+  writeFile: (path: string, contents: string) => Promise<void>
+  readFile: (path: string) => Promise<string | null>
+  listFiles: () => string[]
+  deleteFile: (path: string) => Promise<void>
+  generateImage: (prompt: string, path: string) => Promise<void>
+  runCommand: (command: string) => Promise<{ output: string; exitCode: number }>
+}
 
 export interface AgentRun {
   history: ChatMsg[]
@@ -32,15 +43,15 @@ export interface AgentRun {
   recentErrors?: string
   model: string
   fallbackModel: string | null
-  runCommand: (command: string) => Promise<{ output: string; exitCode: number }>
+  exec: Executors
 }
 
-const MAX_STEPS = 6
+const MAX_STEPS = 8
+const norm = (p: string) => p.trim().replace(/^\.?\//, '')
 
 export function runAgent(run: AgentRun): Observable<AgentEvent> {
   return new Observable<AgentEvent>((sub) => {
     const ctrl = new AbortController()
-
     const convo: ChatMsg[] = [
       { role: 'system', content: SYSTEM_PROMPT },
       { role: 'user', content: buildContextMessage({ files: run.files, recentErrors: run.recentErrors }) },
@@ -48,50 +59,36 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
       { role: 'user', content: run.userPrompt },
     ]
 
-    let acc = '' // cumulative model content across turns (for file-block parsing)
-    let emitted = 0
-    const flushNewFiles = () => {
-      const parsed = parseFiles(acc)
-      for (let i = emitted; i < parsed.length; i++) sub.next({ type: 'file', path: parsed[i].path, contents: parsed[i].contents })
-      emitted = parsed.length
-    }
-
     ;(async () => {
       try {
         for (let step = 0; step < MAX_STEPS; step++) {
           if (ctrl.signal.aborted) { sub.complete(); return }
           sub.next({ type: 'status', status: step === 0 ? 'thinking' : 'working' })
 
-          const { text, toolCalls, model } = await streamChat(
-            convo, run.model, run.fallbackModel,
-            (delta) => { acc += delta; sub.next({ type: 'delta', delta }); if (delta.includes('</file>')) flushNewFiles() },
-            BUILDER_TOOLS,
-            { signal: ctrl.signal },
-          )
-          flushNewFiles()
+          let lastWriting = ''
+          const { text, toolCalls, model } = await streamChat(convo, {
+            model: run.model,
+            fallbackModel: run.fallbackModel,
+            tools: BUILDER_TOOLS,
+            signal: ctrl.signal,
+            onToken: (delta) => sub.next({ type: 'delta', delta }),
+            onTool: (calls) => {
+              // Live "writing …" pill: peek the path out of the still-streaming args.
+              for (const c of calls) {
+                if (c.function.name === 'write_file' || c.function.name === 'generate_image') {
+                  const m = /"path"\s*:\s*"([^"]+)"/.exec(c.function.arguments)
+                  if (m && norm(m[1]) !== lastWriting) { lastWriting = norm(m[1]); sub.next({ type: 'writing', path: lastWriting }) }
+                }
+              }
+            },
+          })
 
           if (toolCalls.length === 0) { sub.next({ type: 'done', model }); sub.complete(); return }
 
-          // Execute the tool calls and feed the results back for the next turn.
           convo.push({ role: 'assistant', content: text, tool_calls: toolCalls })
           for (const call of toolCalls) {
-            let result = { output: '', exitCode: -1 }
-            let command = ''
-            if (call.function.name === 'run_command') {
-              try { command = String(JSON.parse(call.function.arguments || '{}').command ?? '') } catch { command = '' }
-              if (command) {
-                sub.next({ type: 'delta', delta: `\n<cmd>${command}</cmd>\n` })
-                sub.next({ type: 'command', command })
-                result = await run.runCommand(command)
-              }
-            }
-            convo.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              content: command
-                ? `$ ${command}\n(exit ${result.exitCode})\n${result.output || '(no output)'}`
-                : `Unsupported tool: ${call.function.name}`,
-            })
+            const result = await execute(call, run.exec, sub)
+            convo.push({ role: 'tool', tool_call_id: call.id, content: result })
           }
         }
         sub.next({ type: 'done', model: run.model })
@@ -105,4 +102,56 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
 
     return () => ctrl.abort()
   })
+}
+
+async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEvent) => void }): Promise<string> {
+  let args: any = {}
+  try { args = JSON.parse(call.function.arguments || '{}') } catch { /* tolerate */ }
+  const name = call.function.name
+  try {
+    switch (name) {
+      case 'write_file': {
+        const path = norm(String(args.path ?? ''))
+        const contents = String(args.contents ?? '')
+        if (!path) return 'error: missing path'
+        await ex.writeFile(path, contents)
+        sub.next({ type: 'fileWritten', path, contents })
+        sub.next({ type: 'action', action: { kind: 'file', label: `wrote ${path}`, path } })
+        return `ok: wrote ${path}`
+      }
+      case 'read_file': {
+        const path = norm(String(args.path ?? ''))
+        const content = await ex.readFile(path)
+        sub.next({ type: 'action', action: { kind: 'read', label: `read ${path}`, path } })
+        return content == null ? `not found: ${path}` : content
+      }
+      case 'list_files': {
+        const list = ex.listFiles()
+        sub.next({ type: 'action', action: { kind: 'list', label: 'listed files' } })
+        return list.join('\n')
+      }
+      case 'delete_file': {
+        const path = norm(String(args.path ?? ''))
+        await ex.deleteFile(path)
+        sub.next({ type: 'action', action: { kind: 'delete', label: `deleted ${path}`, path } })
+        return `ok: deleted ${path}`
+      }
+      case 'generate_image': {
+        const path = norm(String(args.path ?? ''))
+        await ex.generateImage(String(args.prompt ?? ''), path)
+        sub.next({ type: 'action', action: { kind: 'image', label: `generated ${path}`, path } })
+        return `ok: generated image at ${path}`
+      }
+      case 'run_command': {
+        const command = String(args.command ?? '')
+        sub.next({ type: 'action', action: { kind: 'command', label: command, path: command } })
+        const r = await ex.runCommand(command)
+        return `$ ${command}\n(exit ${r.exitCode})\n${r.output || '(no output)'}`
+      }
+      default:
+        return `unsupported tool: ${name}`
+    }
+  } catch (e: any) {
+    return `error running ${name}: ${e?.message ?? e}`
+  }
 }
