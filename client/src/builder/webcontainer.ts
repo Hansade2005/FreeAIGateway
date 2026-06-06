@@ -91,6 +91,12 @@ export class Workspace {
     try { return await this.wc.fs.readFile(path, 'utf-8') } catch { return null }
   }
 
+  /** Delete a file from the sandbox. */
+  async deleteFile(path: string): Promise<void> {
+    if (!this.wc) return
+    await this.wc.fs.rm(path, { force: true }).catch(() => {})
+  }
+
   /** Write a binary asset (e.g. a generated image) into the project. */
   async writeBinary(path: string, data: Uint8Array): Promise<void> {
     if (!this.wc) return

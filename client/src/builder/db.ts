@@ -13,11 +13,16 @@ export interface Project {
   updatedAt: number
 }
 
+// A compact record of a tool action, persisted so the chat's action pills
+// survive a reload.
+export interface StoredAction { kind: string; label: string; path?: string }
+
 export interface Message {
   id?: number
   projectId: string
   role: 'user' | 'assistant'
   content: string
+  actions?: StoredAction[]
   createdAt: number
 }
 
