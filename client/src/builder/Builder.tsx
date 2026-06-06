@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Download, FileCode, Plus, ExternalLink, X, Square, RotateCw, Rocket } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, Image as ImageIcon, Loader2 } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
-import { parseImages } from './parse'
+import { parseImages, parseActions, inProgressFile } from './parse'
+import { CodeView } from './CodeView'
 import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
@@ -25,7 +26,7 @@ export function Builder() {
   const [previewUrl, setPreviewUrl] = useState('')
   const [errors, setErrors] = useState('')
   const [model, setModel] = useState('auto')
-  const [showFiles, setShowFiles] = useState(false)
+  const [tab, setTab] = useState<'preview' | 'code'>('preview')
   const [selected, setSelected] = useState('src/App.jsx')
   const [fatal, setFatal] = useState('')
 
@@ -236,9 +237,6 @@ export function Builder() {
           {statusLabel[status]}
         </span>
         <span className="font-mono text-[11px] text-muted-foreground">{model}</span>
-        <button onClick={() => setShowFiles((v) => !v)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
-          <FileCode className="size-3.5" /> Files
-        </button>
         <button onClick={() => project && downloadZip(project.name, files, assetsRef.current)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
           <Download className="size-3.5" /> ZIP
         </button>
@@ -264,12 +262,38 @@ export function Builder() {
                   Describe the app you want. e.g. <span className="text-foreground">“a pomodoro timer with a circular progress ring and a task list”</span>. The agent writes the code and the preview updates live.
                 </div>
               )}
-              {messages.map((m, i) => (
-                <div key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
-                  <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                  <div className="whitespace-pre-wrap break-words">{stripFileBlocks(m.content) || (running && i === messages.length - 1 ? '…' : '')}</div>
-                </div>
-              ))}
+              {messages.map((m, i) => {
+                const isLast = i === messages.length - 1
+                const prose = stripFileBlocks(m.content)
+                const actions = m.role === 'assistant' ? parseActions(m.content) : []
+                const writing = m.role === 'assistant' && running && isLast ? inProgressFile(m.content) : null
+                return (
+                  <div key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
+                    <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
+                    <div className="whitespace-pre-wrap break-words">{prose || (running && isLast && actions.length === 0 && !writing ? 'Thinking…' : '')}</div>
+                    {(actions.length > 0 || writing) && (
+                      <div className="mt-2 flex flex-col gap-1">
+                        {actions.map((a, j) => (
+                          <button
+                            key={j}
+                            onClick={() => { setSelected(a.path); setTab('code') }}
+                            className="flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"
+                            title="Open in Code"
+                          >
+                            {a.kind === 'image' ? <ImageIcon className="size-3 text-signal" /> : <FileText className="size-3 text-signal" />}
+                            <span className="truncate">{a.kind === 'image' ? 'generated' : 'wrote'} {a.path}</span>
+                          </button>
+                        ))}
+                        {writing && (
+                          <span className="flex items-center gap-1.5 self-start rounded-md border border-signal/40 bg-signal-muted px-2 py-1 font-mono text-[11px] text-signal">
+                            <Loader2 className="size-3 animate-spin" /> writing {writing}…
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               <div ref={chatEnd} />
             </div>
 
@@ -302,50 +326,40 @@ export function Builder() {
             </div>
           </div>
 
-          {/* Preview */}
-          <div className="relative flex min-w-0 flex-1 flex-col">
+          {/* Preview | Code */}
+          <div className="flex min-w-0 flex-1 flex-col">
             <div className="flex items-center gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground">
-              <RotateCw className="size-3.5 cursor-pointer hover:text-foreground" onClick={() => { const u = previewUrl; setPreviewUrl(''); setTimeout(() => setPreviewUrl(u), 50) }} />
-              <span className="truncate font-mono">{previewUrl || 'preview'}</span>
-              {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer" className="ml-auto hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
-            </div>
-            <div className="flex-1 bg-white">
-              {previewUrl
-                ? <iframe title="preview" src={previewUrl} className="size-full border-0" allow="cross-origin-isolated" />
-                : <div className="grid h-full place-items-center text-sm text-muted-foreground">{statusLabel[status]}</div>}
-            </div>
-
-            {/* Files slide-over */}
-            {showFiles && (
-              <div className="absolute inset-y-0 right-0 flex w-[520px] border-l bg-card shadow-2xl">
-                <div className="w-44 flex-none overflow-y-auto border-r p-2">
-                  <div className="mb-1 flex items-center justify-between px-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Files</span>
-                    <X className="size-3.5 cursor-pointer text-muted-foreground hover:text-foreground" onClick={() => setShowFiles(false)} />
-                  </div>
-                  {Object.keys(files).sort().map((p) => (
-                    <button key={p} onClick={() => { setSelected(p); setDraft(null) }} className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] ${selected === p ? 'bg-signal-muted text-signal' : 'text-muted-foreground hover:bg-surface-2'}`}>{p}</button>
-                  ))}
-                  {Object.keys(assetsRef.current).sort().map((p) => (
-                    <div key={p} className="truncate px-2 py-1 font-mono text-[11px] text-muted-foreground/60" title="generated image">🖼 {p}</div>
-                  ))}
-                </div>
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="flex items-center justify-between border-b px-3 py-1.5">
-                    <span className="truncate font-mono text-[11px] text-muted-foreground">{selected}</span>
-                    {draft !== null && draft !== files[selected] && (
-                      <button onClick={saveDraft} className="rounded bg-signal px-2 py-0.5 text-[11px] font-semibold text-signal-foreground">Save</button>
-                    )}
-                  </div>
-                  <textarea
-                    value={draft ?? files[selected] ?? ''}
-                    onChange={(e) => setDraft(e.target.value)}
-                    spellCheck={false}
-                    className="min-h-0 flex-1 resize-none bg-surface-1 p-3 font-mono text-[11.5px] leading-relaxed focus:outline-none"
-                  />
-                </div>
+              <div className="flex rounded-lg border bg-surface-1 p-0.5">
+                <button onClick={() => setTab('preview')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 ${tab === 'preview' ? 'bg-signal text-signal-foreground' : 'text-muted-foreground hover:text-foreground'}`}><Eye className="size-3.5" /> Preview</button>
+                <button onClick={() => setTab('code')} className={`flex items-center gap-1 rounded-md px-2.5 py-1 ${tab === 'code' ? 'bg-signal text-signal-foreground' : 'text-muted-foreground hover:text-foreground'}`}><Code2 className="size-3.5" /> Code</button>
               </div>
-            )}
+              {tab === 'preview' && (
+                <>
+                  <RotateCw className="ml-1 size-3.5 cursor-pointer hover:text-foreground" onClick={() => { const u = previewUrl; setPreviewUrl(''); setTimeout(() => setPreviewUrl(u), 50) }} />
+                  <span className="truncate font-mono">{previewUrl || 'preview'}</span>
+                  {previewUrl && <a href={previewUrl} target="_blank" rel="noreferrer" className="ml-auto hover:text-foreground"><ExternalLink className="size-3.5" /></a>}
+                </>
+              )}
+            </div>
+            <div className="min-h-0 flex-1">
+              {tab === 'preview' ? (
+                <div className="size-full bg-white">
+                  {previewUrl
+                    ? <iframe title="preview" src={previewUrl} className="size-full border-0" allow="cross-origin-isolated" />
+                    : <div className="grid h-full place-items-center text-sm text-muted-foreground">{statusLabel[status]}</div>}
+                </div>
+              ) : (
+                <CodeView
+                  files={files}
+                  assets={assetsRef.current}
+                  selected={selected}
+                  onSelect={(p) => { setSelected(p); setDraft(null) }}
+                  draft={draft}
+                  onChangeDraft={setDraft}
+                  onSave={saveDraft}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
