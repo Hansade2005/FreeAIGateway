@@ -89,6 +89,12 @@ imagesRouter.get('/images/files/:name', (req: Request, res: Response) => {
   // helmet's `nosniff` a wrong Content-Type makes the browser refuse to render
   // it — so sniff the magic bytes instead of assuming image/png.
   res.setHeader('Content-Type', sniffImageType(file));
+  // These are public, unauthenticated assets meant to be embedded from any
+  // origin (the dashboard on :5173, a remote app, etc.). Override helmet's
+  // default `same-origin` CORP, which otherwise triggers
+  // ERR_BLOCKED_BY_RESPONSE.NotSameOrigin when the image host ≠ page origin.
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
   fs.createReadStream(file).pipe(res);
 });
 
