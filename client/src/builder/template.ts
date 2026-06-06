@@ -1,47 +1,104 @@
 import type { FileSystemTree } from '@webcontainer/api'
 
-// Phase-0 spike template: a tiny zero-dependency Node HTTP server. It proves the
-// full WebContainer pipeline (boot → mount → spawn → server-ready → preview)
-// WITHOUT a slow `npm install`, so the cross-origin-isolation de-risk doesn't
-// hinge on registry access. Phase 1 swaps this for a real Vite + React project.
-export const spikeFiles: FileSystemTree = {
-  'package.json': {
-    file: {
-      contents: JSON.stringify(
-        { name: 'fag-builder-spike', type: 'module', scripts: { start: 'node server.js' } },
-        null,
-        2,
-      ),
+// The starter project the agent edits: Vite + React 18 + Tailwind v4. Kept
+// deliberately small so free models can reason over the whole thing. The agent
+// rewrites/creates files under src/ (and may add deps to package.json).
+//
+// index.html embeds a tiny runtime-error reporter that postMessages uncaught
+// errors to the parent window, so the builder can surface them and feed them
+// back into the agent for an auto-fix.
+
+export const STARTER_FILES: Record<string, string> = {
+  'package.json': JSON.stringify(
+    {
+      name: 'fag-app',
+      private: true,
+      type: 'module',
+      scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+      dependencies: {
+        react: '^18.3.1',
+        'react-dom': '^18.3.1',
+      },
+      devDependencies: {
+        '@vitejs/plugin-react': '^4.3.4',
+        '@tailwindcss/vite': '^4.0.0',
+        tailwindcss: '^4.0.0',
+        vite: '^5.4.10',
+      },
     },
-  },
-  'server.js': {
-    file: {
-      contents: `import { createServer } from 'node:http';
+    null,
+    2,
+  ),
+  'vite.config.js': `import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
-const page = \`<!doctype html><html><head><meta charset="utf-8"><title>WebContainer preview</title>
-<style>
-  :root{color-scheme:dark}
-  body{margin:0;height:100vh;display:grid;place-items:center;font-family:ui-sans-serif,system-ui,sans-serif;
-       background:radial-gradient(60rem 40rem at 20% -10%,#13321f,#0d1014 60%);color:#e8e8ea}
-  .card{text-align:center;padding:40px 48px;border:1px solid rgba(255,255,255,.1);border-radius:24px;
-        background:rgba(255,255,255,.03);box-shadow:0 30px 80px -30px rgba(0,0,0,.6)}
-  h1{font-size:26px;margin:0 0 6px} .ok{color:#5ce39a} p{color:#9aa0a6;margin:4px 0}
-  code{font-family:ui-monospace,monospace;color:#5ce39a}
-</style></head><body>
-  <div class="card">
-    <h1><span class="ok">●</span> Running inside WebContainer</h1>
-    <p>This page is served by a Node HTTP server running <b>in your browser</b>.</p>
-    <p>No cloud sandbox. Live clock: <code id="t">…</code></p>
-  </div>
-  <script>setInterval(()=>{document.getElementById('t').textContent=new Date().toLocaleTimeString()},1000)</script>
-</body></html>\`;
-
-const server = createServer((_req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.end(page);
-});
-server.listen(3111, () => console.log('[spike] server listening on http://localhost:3111'));
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  server: { host: true },
+})
 `,
-    },
-  },
+  'index.html': `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>App</title>
+    <script>
+      // Report uncaught errors to the builder (parent window) for auto-fix.
+      (function () {
+        function send(kind, msg, stack) {
+          try { parent.postMessage({ __fagPreview: true, kind: kind, message: String(msg), stack: stack ? String(stack) : '' }, '*'); } catch (e) {}
+        }
+        window.addEventListener('error', function (e) { send('error', e.message, e.error && e.error.stack); });
+        window.addEventListener('unhandledrejection', function (e) { send('unhandledrejection', (e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack); });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`,
+  'src/main.jsx': `import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+createRoot(document.getElementById('root')).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+`,
+  'src/index.css': `@import "tailwindcss";
+`,
+  'src/App.jsx': `export default function App() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-950 text-neutral-100">
+      <div className="text-center space-y-3">
+        <h1 className="text-3xl font-semibold">Your app starts here</h1>
+        <p className="text-neutral-400">Describe what you want to build in the chat →</p>
+      </div>
+    </div>
+  )
+}
+`,
+}
+
+// Convert the flat path→content map into the nested tree WebContainer.mount wants.
+export function toFileSystemTree(files: Record<string, string>): FileSystemTree {
+  const tree: FileSystemTree = {}
+  for (const [path, contents] of Object.entries(files)) {
+    const parts = path.split('/')
+    let node: any = tree
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dir = parts[i]
+      node[dir] ??= { directory: {} }
+      node = node[dir].directory
+    }
+    node[parts[parts.length - 1]] = { file: { contents } }
+  }
+  return tree
 }
