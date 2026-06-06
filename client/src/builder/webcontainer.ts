@@ -83,12 +83,30 @@ export class Workspace {
     for (const [path, contents] of Object.entries(files)) await this.writeFile(path, contents)
   }
 
+  /** Read a text file from the sandbox (null if missing). */
+  async readFile(path: string): Promise<string | null> {
+    if (!this.wc) return null
+    try { return await this.wc.fs.readFile(path, 'utf-8') } catch { return null }
+  }
+
   /** Write a binary asset (e.g. a generated image) into the project. */
   async writeBinary(path: string, data: Uint8Array): Promise<void> {
     if (!this.wc) return
     const dir = path.split('/').slice(0, -1).join('/')
     if (dir) await this.wc.fs.mkdir(dir, { recursive: true }).catch(() => {})
     await this.wc.fs.writeFile(path, data)
+  }
+
+  /** Run an arbitrary command in the sandbox (for the agent's run_command tool),
+   * capturing combined output and exit code. */
+  async exec(command: string): Promise<{ output: string; exitCode: number }> {
+    if (!this.wc) throw new Error('workspace not started')
+    const parts = command.trim().split(/\s+/)
+    const proc = await this.wc.spawn(parts[0], parts.slice(1))
+    let output = ''
+    proc.output.pipeTo(new WritableStream({ write: (d) => { output += d; this.cb.onOutput?.(d) } }))
+    const exitCode = await proc.exit
+    return { output: output.slice(-4000), exitCode }
   }
 
   /** Re-install (used when package.json changed) then the dev server picks up deps. */

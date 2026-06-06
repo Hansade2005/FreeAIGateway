@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, Image as ImageIcon, Loader2 } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, Image as ImageIcon, Loader2, TerminalSquare } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -142,6 +142,13 @@ export function Builder() {
       recentErrors,
       model,
       fallbackModel: model === BUILDER_PRIMARY_MODEL ? 'auto' : null,
+      runCommand: async (command) => {
+        // package.json may change (npm install) → reflect it in the file view.
+        const r = (await ws.current?.exec(command)) ?? { output: 'sandbox not ready', exitCode: -1 }
+        const pkg = await ws.current?.readFile('package.json')
+        if (pkg) { filesRef.current = { ...filesRef.current, 'package.json': pkg }; setFiles(filesRef.current) }
+        return r
+      },
     }).subscribe({
       next: (ev) => {
         if (ev.type === 'delta') { assistantText += ev.delta; setAssistant((p) => p + ev.delta) }
@@ -273,7 +280,12 @@ export function Builder() {
                     <div className="whitespace-pre-wrap break-words">{prose || (running && isLast && actions.length === 0 && !writing ? 'Thinking…' : '')}</div>
                     {(actions.length > 0 || writing) && (
                       <div className="mt-2 flex flex-col gap-1">
-                        {actions.map((a, j) => (
+                        {actions.map((a, j) => a.kind === 'command' ? (
+                          <span key={j} className="flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px] text-muted-foreground">
+                            <TerminalSquare className="size-3 text-signal" />
+                            <span className="truncate">$ {a.path}</span>
+                          </span>
+                        ) : (
                           <button
                             key={j}
                             onClick={() => { setSelected(a.path); setTab('code') }}
@@ -373,5 +385,6 @@ function stripFileBlocks(text: string): string {
     .replace(/<file[\s\S]*?<\/file>/gi, '')
     .replace(/<file[\s\S]*$/i, '')
     .replace(/<image\s+[^>]*?\/?>/gi, '')
+    .replace(/<cmd>[\s\S]*?<\/cmd>/gi, '')
     .trim()
 }

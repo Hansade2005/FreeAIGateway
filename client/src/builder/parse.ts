@@ -58,7 +58,7 @@ export function parseImages(text: string): ParsedImage[] {
 
 // Ordered list of completed agent actions (file writes + image generations) as
 // they appear in the text — drives the inline action pills in the chat.
-export type AgentAction = { kind: 'file' | 'image'; path: string }
+export type AgentAction = { kind: 'file' | 'image' | 'command'; path: string }
 
 export function parseActions(text: string): AgentAction[] {
   const found: { pos: number; action: AgentAction }[] = []
@@ -70,6 +70,8 @@ export function parseActions(text: string): AgentAction[] {
     const path = /path=["']([^"']+)["']/.exec(m[0])?.[1]
     if (path) found.push({ pos: m.index, action: { kind: 'image', path: path.trim().replace(/^\.?\//, '') } })
   }
+  const cmdRe = /<cmd>([\s\S]*?)<\/cmd>/gi
+  while ((m = cmdRe.exec(text)) !== null) found.push({ pos: m.index, action: { kind: 'command', path: m[1].trim() } })
   return found.sort((a, b) => a.pos - b.pos).map((f) => f.action)
 }
 
