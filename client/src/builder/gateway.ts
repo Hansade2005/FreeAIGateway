@@ -58,15 +58,28 @@ export async function generateImageBytes(prompt: string): Promise<Uint8Array> {
 
 async function once(messages: ChatMsg[], model: string, onToken: (d: string) => void, handle?: StreamHandle): Promise<string> {
   const key = await getUnifiedKey()
-  const res = await fetch('/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, stream: true, messages, temperature: 0.3 }),
-    signal: handle?.signal,
-  })
-  if (!res.ok || !res.body) {
-    const err = await res.json().catch(() => ({} as any))
-    throw new Error(err?.error?.message ?? `gateway HTTP ${res.status}`)
+  const body = JSON.stringify({ model, stream: true, messages, temperature: 0.3 })
+  // Retry transient failures (rate limit / 5xx) on the same model before the
+  // caller falls back to `auto`. Free tiers (Kilo 200/hr) hit 429 under load.
+  let res: Response | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (handle?.signal?.aborted) throw new Error('aborted')
+    res = await fetch('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body,
+      signal: handle?.signal,
+    })
+    if (res.ok && res.body) break
+    if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 600 * 2 ** attempt))
+      continue
+    }
+    break
+  }
+  if (!res || !res.ok || !res.body) {
+    const err = await res?.json().catch(() => ({} as any))
+    throw new Error(err?.error?.message ?? `gateway HTTP ${res?.status ?? '???'}`)
   }
   const reader = res.body.getReader()
   const dec = new TextDecoder()
