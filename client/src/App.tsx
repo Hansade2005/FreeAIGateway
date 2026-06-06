@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { Menu, Moon, Sun, Boxes, Terminal, KeyRound, Activity, SlidersHorizontal } from 'lucide-react'
+import { Menu, Moon, Sun, Boxes, Terminal, KeyRound, Activity, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -154,6 +154,16 @@ function Navbar() {
           {navItems.map((item) => (
             <NavItem key={item.to} {...item} />
           ))}
+          {/* Builder is a separate, cross-origin-isolated entry — a real
+              navigation (not client-side routing), hence a plain anchor. */}
+          <a
+            href="/builder"
+            className="group relative flex items-center gap-2 px-1 py-4 text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Sparkles className="size-4" />
+            <span>Builder</span>
+            <span className="absolute -right-1 -top-0.5 rounded bg-signal-muted px-1 text-[9px] font-semibold uppercase text-signal">beta</span>
+          </a>
         </nav>
         <div
           className="ml-auto hidden items-center gap-2 md:flex"
