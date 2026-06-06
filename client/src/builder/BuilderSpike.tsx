@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { WebContainer } from '@webcontainer/api'
 import { spikeFiles } from './template'
+import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 
 // WebContainer is a singleton per page (only one instance may boot).
 let bootPromise: Promise<WebContainer> | null = null
@@ -15,11 +16,14 @@ export function BuilderSpike() {
   const [status, setStatus] = useState<Status>('idle')
   const [log, setLog] = useState<string[]>([])
   const [previewUrl, setPreviewUrl] = useState('')
+  const [agentModel, setAgentModel] = useState<string>('')
   const isolated = typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : false
   const logEnd = useRef<HTMLDivElement>(null)
 
   const add = (m: string) => setLog((l) => [...l, m])
   useEffect(() => { logEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [log])
+  // The agent will drive codegen with this model (Phase 1).
+  useEffect(() => { resolveBuilderModel().then(setAgentModel) }, [])
 
   async function run() {
     if (status === 'booting' || status === 'running') return
@@ -72,6 +76,10 @@ export function BuilderSpike() {
           </div>
           <div style={{ fontSize: 12, fontFamily: 'ui-monospace, monospace', padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-1, #1a1d22)' }}>
             crossOriginIsolated: <b style={{ color: isolated ? 'var(--signal)' : '#ef4444' }}>{String(isolated)}</b>
+          </div>
+          <div style={{ fontSize: 12, fontFamily: 'ui-monospace, monospace', padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-1, #1a1d22)' }}>
+            agent model: <b style={{ color: 'var(--signal)' }}>{agentModel || '…'}</b>
+            {agentModel && agentModel !== BUILDER_PRIMARY_MODEL && <span style={{ color: 'var(--muted-foreground, #9aa0a6)' }}>  (Kilo not configured → gateway auto)</span>}
           </div>
           <button
             onClick={run}
