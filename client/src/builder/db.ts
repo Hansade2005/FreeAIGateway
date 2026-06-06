@@ -36,21 +36,24 @@ export interface Deploy {
   createdAt: number
 }
 
+// A cached binary snapshot of node_modules, keyed by a hash of the lockfile, so
+// a reload can restore deps instead of re-running npm install over the network.
+export interface Snapshot {
+  hash: string
+  data: Uint8Array
+  createdAt: number
+}
+
 class BuilderDB extends Dexie {
   projects!: Table<Project, string>
   messages!: Table<Message, number>
   deploys!: Table<Deploy, string>
+  snapshots!: Table<Snapshot, string>
   constructor() {
     super('fag-builder')
-    this.version(1).stores({
-      projects: 'id, updatedAt',
-      messages: '++id, projectId, createdAt',
-    })
-    this.version(2).stores({
-      projects: 'id, updatedAt',
-      messages: '++id, projectId, createdAt',
-      deploys: 'id, createdAt',
-    })
+    this.version(1).stores({ projects: 'id, updatedAt', messages: '++id, projectId, createdAt' })
+    this.version(2).stores({ projects: 'id, updatedAt', messages: '++id, projectId, createdAt', deploys: 'id, createdAt' })
+    this.version(3).stores({ projects: 'id, updatedAt', messages: '++id, projectId, createdAt', deploys: 'id, createdAt', snapshots: 'hash, createdAt' })
   }
 }
 
@@ -111,4 +114,15 @@ export async function saveDeploy(name: string, files: Record<string, Uint8Array>
 
 export async function getDeploy(id: string): Promise<Deploy | undefined> {
   return db.deploys.get(id)
+}
+
+// node_modules snapshot cache (keep the few most recent to bound storage).
+export async function getSnapshot(hash: string): Promise<Uint8Array | undefined> {
+  return (await db.snapshots.get(hash))?.data
+}
+
+export async function saveSnapshot(hash: string, data: Uint8Array): Promise<void> {
+  await db.snapshots.put({ hash, data, createdAt: Date.now() })
+  const all = await db.snapshots.orderBy('createdAt').reverse().toArray()
+  for (const s of all.slice(3)) await db.snapshots.delete(s.hash)
 }
