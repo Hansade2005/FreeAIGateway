@@ -16,7 +16,12 @@ RULES:
 
 IMAGES: when the app needs a real image asset (hero, logo, background, illustration, avatar), request one by emitting a self-closing tag — the sandbox generates it for free and writes it to the project:
   <image prompt="detailed description of the image" path="public/hero.png" />
-Always put images under public/ and reference them in code by their root path (e.g. src="/hero.png"). Use as many as the design needs.`
+Always put images under public/ and reference them in code by their root path (e.g. src="/hero.png"). Use as many as the design needs.
+
+TOOLS: you can call the run_command function to run shell commands in the sandbox.
+- BEFORE importing any npm package that isn't already a dependency, install it: run_command("npm install <pkg>").
+- After writing your files, VERIFY by calling run_command("npm run build"). If it fails, read the error in the result, fix the offending file(s) with new <file> blocks, and run the build again — repeat until it succeeds.
+- Only finish once the build passes (or the task is a trivial change). Don't run dev servers or destructive commands.`
 
 export interface ProjectContext {
   files: Record<string, string>

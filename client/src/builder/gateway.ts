@@ -3,7 +3,15 @@
 
 const TOKEN_KEY = 'freellmapi_dashboard_token'
 
-export interface ChatMsg { role: 'system' | 'user' | 'assistant'; content: string }
+export interface ChatMsg {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls?: ToolCall[]
+  tool_call_id?: string
+}
+
+export interface ToolCall { id: string; type: 'function'; function: { name: string; arguments: string } }
+export interface ToolDef { type: 'function'; function: { name: string; description: string; parameters: any } }
 
 let cachedKey: string | null = null
 export async function getUnifiedKey(): Promise<string> {
@@ -16,24 +24,26 @@ export async function getUnifiedKey(): Promise<string> {
 }
 
 export interface StreamHandle { signal?: AbortSignal }
+export interface StreamResult { text: string; toolCalls: ToolCall[]; model: string }
 
-// Stream a chat completion, invoking onToken for each content delta and
-// returning the full assistant text. Tries `model`, and on failure retries once
-// with `fallbackModel` (kilo-auto/free → auto).
+// Stream a chat completion: invokes onToken for each content delta, accumulates
+// any tool calls, and returns both. Tries `model`, falling back to
+// `fallbackModel` (kilo-auto/free → auto) on failure.
 export async function streamChat(
   messages: ChatMsg[],
   model: string,
   fallbackModel: string | null,
   onToken: (delta: string) => void,
+  tools?: ToolDef[],
   handle?: StreamHandle,
-): Promise<{ text: string; model: string }> {
+): Promise<StreamResult> {
   try {
-    const text = await once(messages, model, onToken, handle)
-    return { text, model }
+    const r = await once(messages, model, onToken, tools, handle)
+    return { ...r, model }
   } catch (e) {
     if (fallbackModel && fallbackModel !== model && !handle?.signal?.aborted) {
-      const text = await once(messages, fallbackModel, onToken, handle)
-      return { text, model: fallbackModel }
+      const r = await once(messages, fallbackModel, onToken, tools, handle)
+      return { ...r, model: fallbackModel }
     }
     throw e
   }
@@ -56,9 +66,15 @@ export async function generateImageBytes(prompt: string): Promise<Uint8Array> {
   return new Uint8Array(await img.arrayBuffer())
 }
 
-async function once(messages: ChatMsg[], model: string, onToken: (d: string) => void, handle?: StreamHandle): Promise<string> {
+async function once(
+  messages: ChatMsg[],
+  model: string,
+  onToken: (d: string) => void,
+  tools: ToolDef[] | undefined,
+  handle?: StreamHandle,
+): Promise<{ text: string; toolCalls: ToolCall[] }> {
   const key = await getUnifiedKey()
-  const body = JSON.stringify({ model, stream: true, messages, temperature: 0.3 })
+  const body = JSON.stringify({ model, stream: true, messages, temperature: 0.3, ...(tools?.length ? { tools, tool_choice: 'auto' } : {}) })
   // Retry transient failures (rate limit / 5xx) on the same model before the
   // caller falls back to `auto`. Free tiers (Kilo 200/hr) hit 429 under load.
   let res: Response | null = null
@@ -85,6 +101,7 @@ async function once(messages: ChatMsg[], model: string, onToken: (d: string) => 
   const dec = new TextDecoder()
   let buf = ''
   let full = ''
+  const tcAcc: Record<number, ToolCall> = {} // assemble streamed tool-call deltas by index
   for (;;) {
     const { done, value } = await reader.read()
     if (done) break
@@ -97,10 +114,20 @@ async function once(messages: ChatMsg[], model: string, onToken: (d: string) => 
       const data = t.slice(5).trim()
       if (data === '[DONE]') continue
       try {
-        const delta = JSON.parse(data).choices?.[0]?.delta?.content
-        if (delta) { full += delta; onToken(delta) }
+        const delta = JSON.parse(data).choices?.[0]?.delta
+        if (delta?.content) { full += delta.content; onToken(delta.content) }
+        if (delta?.tool_calls) {
+          for (const d of delta.tool_calls) {
+            const i = d.index ?? 0
+            tcAcc[i] ??= { id: d.id || `call_${i}`, type: 'function', function: { name: '', arguments: '' } }
+            if (d.id) tcAcc[i].id = d.id
+            if (d.function?.name) tcAcc[i].function.name += d.function.name
+            if (d.function?.arguments) tcAcc[i].function.arguments += d.function.arguments
+          }
+        }
       } catch { /* ignore keepalive / partial */ }
     }
   }
-  return full
+  const toolCalls = Object.keys(tcAcc).sort((a, b) => +a - +b).map((k) => tcAcc[+k]).filter((c) => c.function.name)
+  return { text: full, toolCalls }
 }
