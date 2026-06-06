@@ -102,6 +102,15 @@ export function createApp() {
     ? path.resolve(process.env.CLIENT_DIST)
     : path.resolve(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
+  // Builder entry — cross-origin isolated so WebContainer can run a Node runtime
+  // in the browser. COOP/COEP are scoped to this document only (the rest of the
+  // dashboard stays un-isolated). `credentialless` lets cross-origin subresources
+  // (the WebContainer runtime CDN) load without per-resource CORP.
+  app.get(['/builder', '/builder.html'], (_req, res) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
+    res.sendFile(path.join(clientDist, 'builder.html'));
+  });
   // SPA fallback — serve index.html for non-API routes
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {
