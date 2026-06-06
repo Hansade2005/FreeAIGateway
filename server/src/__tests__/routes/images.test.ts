@@ -86,4 +86,27 @@ describe('POST /v1/images/generations', () => {
     expect(entry.b64_json).toBe(PNG.toString('base64'));
     expect(fs.existsSync(entry.path)).toBe(true);
   });
+
+  it('serves the saved file cross-origin with a sniffed content type', async () => {
+    const server = app.listen(0);
+    const addr = server.address() as any;
+    const origin = `http://127.0.0.1:${addr.port}`;
+    try {
+      const gen = await fetch(`${origin}/v1/images/generations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ prompt: 'a fox' }),
+      });
+      const url = (await gen.json()).data[0].url as string;
+      const img = await fetch(url);
+      expect(img.status).toBe(200);
+      // CORP must be cross-origin so the <img> isn't blocked when the page
+      // origin differs from the image host (ERR_BLOCKED_BY_RESPONSE.NotSameOrigin).
+      expect(img.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
+      // PNG magic bytes in the stub → sniffed as image/png.
+      expect(img.headers.get('content-type')).toBe('image/png');
+    } finally {
+      server.close();
+    }
+  });
 });
