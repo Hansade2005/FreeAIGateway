@@ -3,12 +3,14 @@ import type { Subscription } from 'rxjs'
 import { Sparkles, Send, Download, FileCode, Plus, ExternalLink, X, Square, RotateCw } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
+import { generateImageBytes } from './gateway'
+import { parseImages } from './parse'
 import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message,
-  createProject, getProject, listProjects, saveFiles, addMessage, getMessages,
+  createProject, getProject, listProjects, saveFiles, saveAssets, addMessage, getMessages,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -29,7 +31,9 @@ export function Builder() {
 
   const ws = useRef<Workspace | null>(null)
   const filesRef = useRef<Record<string, string>>({})
+  const assetsRef = useRef<Record<string, Uint8Array>>({})
   const [files, setFiles] = useState<Record<string, string>>({})
+  const [draft, setDraft] = useState<string | null>(null) // editable buffer for the selected file
   const sub = useRef<Subscription | null>(null)
   const logRef = useRef('')
   const chatEnd = useRef<HTMLDivElement>(null)
@@ -62,15 +66,16 @@ export function Builder() {
       localStorage.setItem(LAST_KEY, proj.id)
       setProject(proj)
       filesRef.current = proj.files
+      assetsRef.current = proj.assets ?? {}
       setFiles(proj.files)
       setMessages(await getMessages(proj.id))
-      await boot(proj.files)
+      await boot(proj.files, assetsRef.current)
     })().catch((e) => setFatal(e?.message ?? String(e)))
 
     return () => { window.removeEventListener('message', onMsg); sub.current?.unsubscribe() }
   }, [])
 
-  async function boot(initial: Record<string, string>) {
+  async function boot(initial: Record<string, string>, assets: Record<string, Uint8Array> = {}) {
     try {
       const w = new Workspace({
         onStatus: setStatus,
@@ -82,9 +87,27 @@ export function Builder() {
       })
       ws.current = w
       await w.start(initial)
+      // Restore generated image assets into the running project.
+      for (const [path, bytes] of Object.entries(assets)) await w.writeBinary(path, bytes).catch(() => {})
     } catch (e: any) {
       setFatal(e?.message ?? String(e))
     }
+  }
+
+  // Generate the images the agent requested (<image> tags) and write them in.
+  async function processImages(text: string) {
+    const imgs = parseImages(text)
+    if (!imgs.length || !project) return
+    for (const im of imgs) {
+      try {
+        setStatus('starting')
+        const bytes = await generateImageBytes(im.prompt)
+        assetsRef.current = { ...assetsRef.current, [im.path]: bytes }
+        await ws.current?.writeBinary(im.path, bytes)
+      } catch { /* skip a failed asset */ }
+    }
+    await saveAssets(project.id, assetsRef.current)
+    setStatus('ready')
   }
 
   function setAssistant(update: (prev: string) => string) {
@@ -140,12 +163,23 @@ export function Builder() {
           await ws.current?.reinstall().catch(() => {})
           setStatus('ready')
         }
+        await processImages(assistantText)
         setRunning(false)
       },
     })
   }
 
   function stop() { sub.current?.unsubscribe(); setRunning(false) }
+
+  // Manual edit of the selected file → write to the running sandbox + persist.
+  async function saveDraft() {
+    if (draft === null || !project) return
+    filesRef.current = { ...filesRef.current, [selected]: draft }
+    setFiles(filesRef.current)
+    await ws.current?.writeFile(selected, draft).catch(() => {})
+    await saveFiles(project.id, filesRef.current)
+    setDraft(null)
+  }
 
   async function newProject() {
     const p = await createProject('My app', { ...STARTER_FILES })
@@ -189,7 +223,7 @@ export function Builder() {
         <button onClick={() => setShowFiles((v) => !v)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
           <FileCode className="size-3.5" /> Files
         </button>
-        <button onClick={() => project && downloadZip(project.name, files)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
+        <button onClick={() => project && downloadZip(project.name, files, assetsRef.current)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
           <Download className="size-3.5" /> ZIP
         </button>
       </header>
@@ -271,10 +305,26 @@ export function Builder() {
                     <X className="size-3.5 cursor-pointer text-muted-foreground hover:text-foreground" onClick={() => setShowFiles(false)} />
                   </div>
                   {Object.keys(files).sort().map((p) => (
-                    <button key={p} onClick={() => setSelected(p)} className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] ${selected === p ? 'bg-signal-muted text-signal' : 'text-muted-foreground hover:bg-surface-2'}`}>{p}</button>
+                    <button key={p} onClick={() => { setSelected(p); setDraft(null) }} className={`block w-full truncate rounded px-2 py-1 text-left font-mono text-[11px] ${selected === p ? 'bg-signal-muted text-signal' : 'text-muted-foreground hover:bg-surface-2'}`}>{p}</button>
+                  ))}
+                  {Object.keys(assetsRef.current).sort().map((p) => (
+                    <div key={p} className="truncate px-2 py-1 font-mono text-[11px] text-muted-foreground/60" title="generated image">🖼 {p}</div>
                   ))}
                 </div>
-                <pre className="min-w-0 flex-1 overflow-auto bg-surface-1 p-3 font-mono text-[11.5px] leading-relaxed"><code>{files[selected] ?? ''}</code></pre>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex items-center justify-between border-b px-3 py-1.5">
+                    <span className="truncate font-mono text-[11px] text-muted-foreground">{selected}</span>
+                    {draft !== null && draft !== files[selected] && (
+                      <button onClick={saveDraft} className="rounded bg-signal px-2 py-0.5 text-[11px] font-semibold text-signal-foreground">Save</button>
+                    )}
+                  </div>
+                  <textarea
+                    value={draft ?? files[selected] ?? ''}
+                    onChange={(e) => setDraft(e.target.value)}
+                    spellCheck={false}
+                    className="min-h-0 flex-1 resize-none bg-surface-1 p-3 font-mono text-[11.5px] leading-relaxed focus:outline-none"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -286,5 +336,9 @@ export function Builder() {
 
 // Hide raw <file> blocks from the chat bubble (the code lands in the preview/files).
 function stripFileBlocks(text: string): string {
-  return text.replace(/<file[\s\S]*?<\/file>/gi, '').replace(/<file[\s\S]*$/i, '').trim()
+  return text
+    .replace(/<file[\s\S]*?<\/file>/gi, '')
+    .replace(/<file[\s\S]*$/i, '')
+    .replace(/<image\s+[^>]*?\/?>/gi, '')
+    .trim()
 }

@@ -83,6 +83,14 @@ export class Workspace {
     for (const [path, contents] of Object.entries(files)) await this.writeFile(path, contents)
   }
 
+  /** Write a binary asset (e.g. a generated image) into the project. */
+  async writeBinary(path: string, data: Uint8Array): Promise<void> {
+    if (!this.wc) return
+    const dir = path.split('/').slice(0, -1).join('/')
+    if (dir) await this.wc.fs.mkdir(dir, { recursive: true }).catch(() => {})
+    await this.wc.fs.writeFile(path, data)
+  }
+
   /** Re-install (used when package.json changed) then the dev server picks up deps. */
   async reinstall(): Promise<void> {
     await this.install()

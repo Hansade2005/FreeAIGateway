@@ -39,6 +39,23 @@ export async function streamChat(
   }
 }
 
+// Generate an image via the gateway (a0.dev under the hood) and return its raw
+// bytes, so the builder can write it into the project as an asset.
+export async function generateImageBytes(prompt: string): Promise<Uint8Array> {
+  const key = await getUnifiedKey()
+  const res = await fetch('/v1/images/generations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ prompt }),
+  })
+  if (!res.ok) throw new Error('image generation failed')
+  const url = (await res.json())?.data?.[0]?.url
+  if (!url) throw new Error('no image url returned')
+  const img = await fetch(url)
+  if (!img.ok) throw new Error('could not fetch generated image')
+  return new Uint8Array(await img.arrayBuffer())
+}
+
 async function once(messages: ChatMsg[], model: string, onToken: (d: string) => void, handle?: StreamHandle): Promise<string> {
   const key = await getUnifiedKey()
   const res = await fetch('/v1/chat/completions', {

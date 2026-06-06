@@ -12,7 +12,11 @@ RULES:
 - Always rewrite the WHOLE file when changing it. Keep the app in \`src/\`. The entry is \`src/main.jsx\` rendering \`src/App.jsx\`.
 - If you add an npm dependency, output the full updated \`package.json\` as a file block too.
 - Before the file blocks, write ONE short sentence describing what you did. No other prose, no explanations after the files.
-- Write clean, complete, runnable code. No placeholders, no "// TODO", no truncation.`
+- Write clean, complete, runnable code. No placeholders, no "// TODO", no truncation.
+
+IMAGES: when the app needs a real image asset (hero, logo, background, illustration, avatar), request one by emitting a self-closing tag — the sandbox generates it for free and writes it to the project:
+  <image prompt="detailed description of the image" path="public/hero.png" />
+Always put images under public/ and reference them in code by their root path (e.g. src="/hero.png"). Use as many as the design needs.`
 
 export interface ProjectContext {
   files: Record<string, string>

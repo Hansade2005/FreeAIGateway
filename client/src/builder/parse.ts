@@ -36,3 +36,22 @@ function stripFence(raw: string): string {
 export function hasCompleteFile(text: string): boolean {
   return /<\/file>/i.test(text)
 }
+
+// The agent can request a generated image asset:
+//   <image prompt="a neon koi over a reef" path="public/hero.png" />
+// The builder generates it via the gateway and writes the bytes into the project.
+export interface ParsedImage { prompt: string; path: string }
+
+const IMAGE_RE = /<image\s+([^>]*?)\/?>/gi
+
+export function parseImages(text: string): ParsedImage[] {
+  const out: ParsedImage[] = []
+  let m: RegExpExecArray | null
+  while ((m = IMAGE_RE.exec(text)) !== null) {
+    const attrs = m[1]
+    const prompt = /prompt=["']([^"']+)["']/.exec(attrs)?.[1]
+    const path = /path=["']([^"']+)["']/.exec(attrs)?.[1]
+    if (prompt && path) out.push({ prompt: prompt.trim(), path: path.trim().replace(/^\.?\//, '') })
+  }
+  return out
+}
