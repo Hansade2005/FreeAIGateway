@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Download, FileCode, Plus, ExternalLink, X, Square, RotateCw } from 'lucide-react'
+import { Sparkles, Send, Download, FileCode, Plus, ExternalLink, X, Square, RotateCw, Rocket } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -10,7 +10,7 @@ import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message,
-  createProject, getProject, listProjects, saveFiles, saveAssets, addMessage, getMessages,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -181,6 +181,22 @@ export function Builder() {
     setDraft(null)
   }
 
+  // Build in the sandbox, hand the dist off via IndexedDB, and open the
+  // (non-isolated) deploy page where Puter auth + upload happen.
+  async function deploy() {
+    if (!project || running || status !== 'ready') return
+    try {
+      setStatus('installing')
+      const dist = await ws.current!.build()
+      const id = await saveDeploy(project.name, dist)
+      setStatus('ready')
+      window.open(`/deploy?id=${id}`, '_blank', 'noopener')
+    } catch (e: any) {
+      setStatus('ready')
+      setErrors((p) => (p + '\nBuild failed: ' + (e?.message ?? e)).slice(-3000))
+    }
+  }
+
   async function newProject() {
     const p = await createProject('My app', { ...STARTER_FILES })
     localStorage.setItem(LAST_KEY, p.id)
@@ -225,6 +241,9 @@ export function Builder() {
         </button>
         <button onClick={() => project && downloadZip(project.name, files, assetsRef.current)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2">
           <Download className="size-3.5" /> ZIP
+        </button>
+        <button onClick={deploy} disabled={running || status !== 'ready'} className="flex items-center gap-1 rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground disabled:opacity-50" title="Build and deploy to Puter">
+          <Rocket className="size-3.5" /> Deploy
         </button>
       </header>
 

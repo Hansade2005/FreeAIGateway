@@ -111,6 +111,16 @@ export function createApp() {
     res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless');
     res.sendFile(path.join(clientDist, 'builder.html'));
   });
+  // Deploy page — deliberately NOT isolated, so Puter's popup auth works. It
+  // reads the built files the builder handed off via IndexedDB and publishes
+  // them to Puter.
+  app.get(['/deploy', '/deploy.html'], (_req, res) => {
+    // Override helmet's default COOP (same-origin), which would sever the Puter
+    // auth popup's window.opener and hang sign-in. unsafe-none keeps the popup
+    // connected. (No COEP here either — this page must stay un-isolated.)
+    res.setHeader('Cross-Origin-Opener-Policy', 'unsafe-none');
+    res.sendFile(path.join(clientDist, 'deploy.html'));
+  });
   // SPA fallback — serve index.html for non-API routes
   app.use((req, res, next) => {
     if (req.path.startsWith('/api/') || req.path.startsWith('/v1/')) {

@@ -21,14 +21,30 @@ export interface Message {
   createdAt: number
 }
 
+// Handoff record: the (isolated) builder writes the built dist/ here, then opens
+// the non-isolated /deploy page which reads it by id and uploads to Puter.
+// Same-origin IndexedDB is shared across tabs regardless of COOP isolation.
+export interface Deploy {
+  id: string
+  name: string
+  files: Record<string, Uint8Array>
+  createdAt: number
+}
+
 class BuilderDB extends Dexie {
   projects!: Table<Project, string>
   messages!: Table<Message, number>
+  deploys!: Table<Deploy, string>
   constructor() {
     super('fag-builder')
     this.version(1).stores({
       projects: 'id, updatedAt',
       messages: '++id, projectId, createdAt',
+    })
+    this.version(2).stores({
+      projects: 'id, updatedAt',
+      messages: '++id, projectId, createdAt',
+      deploys: 'id, createdAt',
     })
   }
 }
@@ -77,4 +93,17 @@ export async function addMessage(m: Omit<Message, 'id' | 'createdAt'>): Promise<
 
 export async function getMessages(projectId: string): Promise<Message[]> {
   return db.messages.where('projectId').equals(projectId).sortBy('createdAt')
+}
+
+export async function saveDeploy(name: string, files: Record<string, Uint8Array>): Promise<string> {
+  const id = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
+  await db.deploys.put({ id, name, files, createdAt: Date.now() })
+  // Keep the store tidy — drop handoffs older than an hour.
+  const cutoff = Date.now() - 3600_000
+  await db.deploys.where('createdAt').below(cutoff).delete().catch(() => {})
+  return id
+}
+
+export async function getDeploy(id: string): Promise<Deploy | undefined> {
+  return db.deploys.get(id)
 }

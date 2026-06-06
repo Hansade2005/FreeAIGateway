@@ -17,6 +17,7 @@ const builderCoiHeaders = () => ({
         res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
       }
       if (url === '/builder') req.url = '/builder.html' // clean URL in dev
+      if (url === '/deploy') req.url = '/deploy.html'   // non-isolated (no COI headers)
       next()
     })
   },
@@ -44,6 +45,7 @@ export default defineConfig(({ mode }) => {
         input: {
           main: path.resolve(__dirname, 'index.html'),
           builder: path.resolve(__dirname, 'builder.html'),
+          deploy: path.resolve(__dirname, 'deploy.html'),
         },
       },
     },

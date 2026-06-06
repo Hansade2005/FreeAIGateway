@@ -96,8 +96,9 @@ export class Workspace {
     await this.install()
   }
 
-  /** Build for production and return the emitted dist/ files (for deploy/export). */
-  async build(): Promise<Record<string, string>> {
+  /** Build for production and return the emitted dist/ files as bytes (text and
+   * binary alike) — ready to upload to a host. */
+  async build(): Promise<Record<string, Uint8Array>> {
     if (!this.wc) throw new Error('workspace not started')
     const proc = await this.wc.spawn('npm', ['run', 'build'])
     this.pipe(proc)
@@ -106,14 +107,14 @@ export class Workspace {
     return this.readDir('dist')
   }
 
-  private async readDir(dir: string, base = dir): Promise<Record<string, string>> {
+  private async readDir(dir: string, base = dir): Promise<Record<string, Uint8Array>> {
     if (!this.wc) return {}
-    const out: Record<string, string> = {}
+    const out: Record<string, Uint8Array> = {}
     const entries = await this.wc.fs.readdir(dir, { withFileTypes: true })
     for (const e of entries) {
       const full = `${dir}/${e.name}`
       if (e.isDirectory()) Object.assign(out, await this.readDir(full, base))
-      else out[full.slice(base.length + 1)] = await this.wc.fs.readFile(full, 'utf-8')
+      else out[full.slice(base.length + 1)] = await this.wc.fs.readFile(full)
     }
     return out
   }
