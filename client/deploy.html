@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      try {
+        const theme = localStorage.getItem('theme')
+        document.documentElement.classList.add(theme === 'light' ? 'light' : 'dark')
+      } catch {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
+    <title>Deploy · FreeAIGateway Builder</title>
+    <!-- Puter SDK (popup auth works here — this page is NOT cross-origin isolated). -->
+    <script src="https://js.puter.com/v2/"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/builder/deploy.ts"></script>
+  </body>
+</html>
