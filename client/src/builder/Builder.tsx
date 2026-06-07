@@ -518,41 +518,49 @@ function MsgIcon({ title, onClick, children }: { title: string; onClick: () => v
 const pillText = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + '…' : s)
 
 // A single agent action rendered as an inline pill. File/image/delete open the
-// target in Code; command pills are collapsible to reveal their output.
+// target in Code; any action that produced output (command, console, dom, read)
+// is collapsible to reveal it.
 function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: string) => void }) {
   const [open, setOpen] = useState(false)
   const base = 'flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px]'
+  const Icon = action.kind === 'command' ? TerminalSquare
+    : action.kind === 'console' ? ScrollText
+    : action.kind === 'screenshot' ? Camera
+    : action.kind === 'dom' ? Code2
+    : action.kind === 'design' ? Palette
+    : action.kind === 'image' ? ImageIcon
+    : action.kind === 'delete' ? Trash2
+    : action.kind === 'file' ? FileText
+    : FileSearch
 
-  if (action.kind === 'command') {
-    const cmd = action.label.replace(/^\$ /, '')
+  // File/image/delete → click to open in the Code tab.
+  if (action.kind === 'file' || action.kind === 'image' || action.kind === 'delete') {
+    return (
+      <button onClick={() => action.path && onOpen(action.path)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
+        <Icon className={`size-3 shrink-0 ${action.kind === 'delete' ? 'text-destructive' : 'text-signal'}`} />
+        <span>{pillText(action.label)}</span>
+      </button>
+    )
+  }
+
+  const label = action.kind === 'command' ? '$ ' + pillText(action.label.replace(/^\$ /, '')) : pillText(action.label)
+
+  // Anything with captured output → collapsible (terminal, console, dom, read).
+  if (action.output) {
     return (
       <div className="self-start">
-        <button
-          onClick={() => action.output && setOpen((o) => !o)}
-          className={`${base} text-muted-foreground ${action.output ? 'hover:text-foreground' : ''}`}
-          title={cmd}
-        >
-          <TerminalSquare className="size-3 shrink-0 text-signal" />
-          <span>$ {pillText(cmd)}</span>
-          {action.output && <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />}
+        <button onClick={() => setOpen((o) => !o)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
+          <Icon className={`size-3 shrink-0 ${action.kind === 'command' ? 'text-signal' : ''}`} />
+          <span>{label}</span>
+          <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
-        {open && action.output && (
+        {open && (
           <pre className="mt-1 max-h-52 max-w-[340px] overflow-auto whitespace-pre-wrap rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>
         )}
       </div>
     )
   }
 
-  if (action.kind === 'read' || action.kind === 'list' || action.kind === 'console' || action.kind === 'dom' || action.kind === 'screenshot' || action.kind === 'design') {
-    const Ico = action.kind === 'console' ? ScrollText : action.kind === 'screenshot' ? Camera : action.kind === 'dom' ? Code2 : action.kind === 'design' ? Palette : FileSearch
-    return <span className={`${base} text-muted-foreground/60`} title={action.label}><Ico className="size-3 shrink-0" /><span>{pillText(action.label)}</span></span>
-  }
-
-  const Icon = action.kind === 'image' ? ImageIcon : action.kind === 'delete' ? Trash2 : FileText
-  return (
-    <button onClick={() => action.path && onOpen(action.path)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
-      <Icon className={`size-3 shrink-0 ${action.kind === 'delete' ? 'text-destructive' : 'text-signal'}`} />
-      <span>{pillText(action.label)}</span>
-    </button>
-  )
+  // Plain informational pill (list, design, screenshot, …).
+  return <span className={`${base} text-muted-foreground/60`} title={action.label}><Icon className="size-3 shrink-0" /><span>{label}</span></span>
 }

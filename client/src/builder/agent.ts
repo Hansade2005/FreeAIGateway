@@ -155,7 +155,7 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
       case 'read_file': {
         const path = norm(String(args.path ?? ''))
         const content = await ex.readFile(path)
-        sub.next({ type: 'action', action: { kind: 'read', label: `read ${path}`, path } })
+        sub.next({ type: 'action', action: { kind: 'read', label: `read ${path}`, path, output: content == null ? `not found: ${path}` : content.slice(0, 4000) } })
         return { content: content == null ? `not found: ${path}` : content }
       }
       case 'list_files': {
@@ -190,12 +190,14 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         return { content: `${FRONTEND_DESIGN_GUIDE}\n\n=== NO DESIGN SYSTEM YET ===\nDecide a distinctive design system now and write it to .pipilot/design.md (chosen aesthetic direction, display + body fonts with their import URLs, color tokens, spacing scale, motion approach, and component conventions), then build the UI to match it.` }
       }
       case 'get_console_logs': {
-        sub.next({ type: 'action', action: { kind: 'console', label: 'read console' } })
-        return { content: await ex.getConsoleLogs() }
+        const logs = await ex.getConsoleLogs()
+        sub.next({ type: 'action', action: { kind: 'console', label: 'read console', output: logs.slice(-4000) } })
+        return { content: logs }
       }
       case 'read_dom': {
-        sub.next({ type: 'action', action: { kind: 'dom', label: 'inspected the page' } })
-        return { content: await ex.readDom() }
+        const dom = await ex.readDom()
+        sub.next({ type: 'action', action: { kind: 'dom', label: 'inspected the page', output: dom.slice(0, 4000) } })
+        return { content: dom }
       }
       case 'screenshot': {
         sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot' } })
