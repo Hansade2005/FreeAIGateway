@@ -1,12 +1,13 @@
 import { Observable } from 'rxjs'
 import { streamChat, type ChatMsg, type ToolDef, type ToolCall } from './gateway'
-import { SYSTEM_PROMPT, buildContextMessage } from './prompts'
+import { SYSTEM_PROMPT, buildContextMessage, FRONTEND_DESIGN_GUIDE } from './prompts'
 
 // The builder agent is a pure function-calling agent: it reads/writes files,
 // generates images, and runs commands via real tools, executed client-side
 // against the WebContainer. No tag parsing.
 
 export const BUILDER_TOOLS: ToolDef[] = [
+  { type: 'function', function: { name: 'frontend_design', description: 'Get expert frontend-design guidance AND this project\'s design system. ALWAYS call this first before designing or restyling any app, page, or component.', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file with the full contents. Use for new files or full rewrites. For small targeted changes, prefer edit_file.', parameters: { type: 'object', properties: { path: { type: 'string', description: 'project-relative path, e.g. src/App.jsx' }, contents: { type: 'string', description: 'the full file contents' } }, required: ['path', 'contents'] } } },
   { type: 'function', function: { name: 'edit_file', description: 'Make a precise edit by replacing an EXACT text snippet in a file — cheaper and safer than rewriting the whole file. The `find` text must match exactly (including whitespace/indentation). By default replaces the first occurrence; set replace_all to replace every occurrence. Fails if `find` is not present.', parameters: { type: 'object', properties: { path: { type: 'string' }, find: { type: 'string', description: 'exact text to find' }, replace: { type: 'string', description: 'replacement text' }, replace_all: { type: 'boolean', description: 'replace all occurrences (default false = first only)' } }, required: ['path', 'find', 'replace'] } } },
   { type: 'function', function: { name: 'read_file', description: 'Read a file to inspect its current contents before editing.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
@@ -19,7 +20,7 @@ export const BUILDER_TOOLS: ToolDef[] = [
   { type: 'function', function: { name: 'screenshot', description: 'Capture a screenshot of the running app to visually inspect the UI.', parameters: { type: 'object', properties: {} } } },
 ]
 
-export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot'
+export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot' | 'design'
 export interface AgentAction { kind: ActionKind; label: string; path?: string; output?: string }
 
 export type AgentEvent =
@@ -179,6 +180,14 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         const out = `(exit ${r.exitCode})\n${r.output || '(no output)'}`.slice(-2000)
         sub.next({ type: 'action', action: { kind: 'command', label: command, path: command, output: out } })
         return { content: `$ ${command}\n${out}` }
+      }
+      case 'frontend_design': {
+        sub.next({ type: 'action', action: { kind: 'design', label: 'consulted design guide' } })
+        const existing = await ex.readFile('.pipilot/design.md')
+        if (existing && existing.trim()) {
+          return { content: `${FRONTEND_DESIGN_GUIDE}\n\n=== THIS PROJECT'S DESIGN SYSTEM (.pipilot/design.md) — follow it for consistency ===\n${existing}` }
+        }
+        return { content: `${FRONTEND_DESIGN_GUIDE}\n\n=== NO DESIGN SYSTEM YET ===\nDecide a distinctive design system now and write it to .pipilot/design.md (chosen aesthetic direction, display + body fonts with their import URLs, color tokens, spacing scale, motion approach, and component conventions), then build the UI to match it.` }
       }
       case 'get_console_logs': {
         sub.next({ type: 'action', action: { kind: 'console', label: 'read console' } })

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -543,8 +543,8 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
     )
   }
 
-  if (action.kind === 'read' || action.kind === 'list' || action.kind === 'console' || action.kind === 'dom' || action.kind === 'screenshot') {
-    const Ico = action.kind === 'console' ? ScrollText : action.kind === 'screenshot' ? Camera : action.kind === 'dom' ? Code2 : FileSearch
+  if (action.kind === 'read' || action.kind === 'list' || action.kind === 'console' || action.kind === 'dom' || action.kind === 'screenshot' || action.kind === 'design') {
+    const Ico = action.kind === 'console' ? ScrollText : action.kind === 'screenshot' ? Camera : action.kind === 'dom' ? Code2 : action.kind === 'design' ? Palette : FileSearch
     return <span className={`${base} text-muted-foreground/60`} title={action.label}><Ico className="size-3 shrink-0" /><span>{pillText(action.label)}</span></span>
   }
 
