@@ -1,14 +1,5 @@
 import { WebContainer } from '@webcontainer/api'
 import { toFileSystemTree } from './template'
-import { getSnapshot, saveSnapshot } from './db'
-
-// Stable key for a dependency set — a hash of the lockfile. Identical lockfile
-// ⇒ identical node_modules ⇒ a cached snapshot is safe to restore.
-function depsHash(s: string): string {
-  let h = 5381
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0
-  return 'd' + h.toString(36)
-}
 
 // Thin lifecycle wrapper around a single WebContainer instance: boot → mount →
 // install → dev server, plus incremental file writes (Vite HMR picks them up,
@@ -37,7 +28,6 @@ export class Workspace {
   private wc: WebContainer | null = null
   private devProc: Awaited<ReturnType<WebContainer['spawn']>> | null = null
   private cb: WCCallbacks
-  private depsKey = ''
   status: WCStatus = 'idle'
   previewUrl = ''
 
@@ -45,7 +35,7 @@ export class Workspace {
 
   private setStatus(s: WCStatus) { this.status = s; this.cb.onStatus?.(s) }
 
-  /** Boot, mount files, restore (or install) node_modules, start the dev server. */
+  /** Boot, mount the given files, npm install, and start the dev server. */
   async start(files: Record<string, string>): Promise<void> {
     if (!self.crossOriginIsolated) throw new Error('Not cross-origin isolated — WebContainer cannot boot on this page.')
     this.setStatus('booting')
@@ -56,47 +46,12 @@ export class Workspace {
       this.cb.onServerReady?.(url)
     })
     await this.wc.mount(toFileSystemTree(files))
-    this.depsKey = depsHash(files['package-lock.json'] || files['package.json'] || '')
-
-    // Restore a cached node_modules snapshot if we've installed these exact deps
-    // before (skips the slow network install on reload). Fall back to install.
-    let restored = false
-    try {
-      const snap = await getSnapshot(this.depsKey)
-      if (snap) {
-        this.setStatus('installing')
-        this.cb.onOutput?.('Restoring cached node_modules…\n')
-        // The mount point must exist before mounting into it.
-        await this.wc.fs.mkdir('node_modules', { recursive: true }).catch(() => {})
-        await this.wc.mount(snap, { mountPoint: 'node_modules' })
-        // Verify the restore actually populated deps; if not, fall through to install.
-        const entries = await this.wc.fs.readdir('node_modules').catch(() => [] as string[])
-        restored = entries.length > 3
-      }
-    } catch { restored = false }
-
-    if (!restored) {
-      await this.install()
-      await this.cacheNodeModules()
-    }
+    await this.install()
     await this.runDev()
   }
 
-  /** Snapshot node_modules into IndexedDB for the current dep set. */
-  private async cacheNodeModules(): Promise<void> {
-    if (!this.wc || !this.depsKey) return
-    try {
-      const data = await this.wc.export('node_modules', { format: 'binary' })
-      await saveSnapshot(this.depsKey, data)
-    } catch { /* snapshotting is best-effort */ }
-  }
-
-  /** Re-snapshot after deps changed (e.g. the agent ran `npm install <pkg>`). */
-  async recacheDeps(): Promise<void> {
-    const lock = (await this.readFile('package-lock.json')) || ''
-    this.depsKey = depsHash(lock)
-    await this.cacheNodeModules()
-  }
+  /** Kept for API compatibility; node_modules snapshotting was removed. */
+  async recacheDeps(): Promise<void> { /* no-op */ }
 
   private pipe(proc: Awaited<ReturnType<WebContainer['spawn']>>) {
     proc.output.pipeTo(new WritableStream({ write: (d) => this.cb.onOutput?.(d) }))
