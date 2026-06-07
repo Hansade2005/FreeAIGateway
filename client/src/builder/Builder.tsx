@@ -189,8 +189,6 @@ export function Builder() {
           const r = (await ws.current?.exec(command)) ?? { output: 'sandbox not ready', exitCode: -1 }
           const pkg = await ws.current?.readFile('package.json')
           if (pkg) { filesRef.current = { ...filesRef.current, 'package.json': pkg }; setFiles(filesRef.current) }
-          // Deps changed → refresh the node_modules snapshot so reloads stay fast.
-          if (/\bnpm\s+(install|i|add)\b/.test(command) && r.exitCode === 0) ws.current?.recacheDeps().catch(() => {})
           return r
         },
         getConsoleLogs: async () => consoleRef.current.slice(-100).join('\n') || '(no console output yet)',
