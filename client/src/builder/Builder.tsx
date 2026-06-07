@@ -9,7 +9,7 @@ import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
 import {
-  type Project, type Message, type StoredAction,
+  type Project, type Message, type StoredAction, type MessagePart,
   createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter,
 } from './db'
 
@@ -140,7 +140,7 @@ export function Builder() {
     // message becomes a restorable checkpoint.
     const checkpoint = { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
     const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, checkpoint, createdAt: Date.now() }
-    setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], createdAt: Date.now() }])
+    setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], parts: [], createdAt: Date.now() }])
     await addMessage({ projectId: project.id, role: 'user', content: prompt, checkpoint })
 
     const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
@@ -148,6 +148,13 @@ export function Builder() {
     setErrors('')
     let content = ''
     const acts: StoredAction[] = []
+    // Ordered timeline of text + actions so pills render inline where they happened.
+    const parts: MessagePart[] = []
+    const pushText = (t: string) => {
+      const last = parts[parts.length - 1]
+      if (last && last.type === 'text') last.text += t
+      else parts.push({ type: 'text', text: t })
+    }
 
     sub.current = runAgent({
       history,
@@ -197,21 +204,23 @@ export function Builder() {
       },
     }).subscribe({
       next: (ev) => {
-        if (ev.type === 'delta') { content += ev.delta; patchAssistant((m) => ({ ...m, content: m.content + ev.delta })) }
+        if (ev.type === 'delta') { content += ev.delta; pushText(ev.delta); patchAssistant((m) => ({ ...m, content, parts: [...parts] })) }
         else if (ev.type === 'writing') setWriting(ev.path)
         else if (ev.type === 'fileWritten') setSelected(ev.path)
         else if (ev.type === 'action') {
           acts.push(ev.action)
-          patchAssistant((m) => ({ ...m, actions: [...acts] }))
+          parts.push({ type: 'action', action: ev.action })
+          patchAssistant((m) => ({ ...m, actions: [...acts], parts: [...parts] }))
           setWriting((w) => (w === ev.action.path ? '' : w))
         } else if (ev.type === 'error') {
           content += `\n\n⚠️ ${ev.message}`
-          patchAssistant((m) => ({ ...m, content: m.content + `\n\n⚠️ ${ev.message}` }))
+          pushText(`\n\n⚠️ ${ev.message}`)
+          patchAssistant((m) => ({ ...m, content, parts: [...parts] }))
         }
       },
       complete: async () => {
         setWriting('')
-        if (content.trim() || acts.length) await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts })
+        if (content.trim() || acts.length) await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts, parts })
         await saveFiles(project.id, filesRef.current)
         // Reload from DB so messages carry their ids + checkpoints (enables the
         // copy / delete / restore actions).
@@ -352,21 +361,36 @@ export function Builder() {
                 const actions = m.actions ?? []
                 const showWriting = m.role === 'assistant' && running && isLast && !!writing
                 const showActionRow = !running || !isLast
+                const openInCode = (p: string) => { setSelected(p); setTab('code') }
+                const empty = !m.content && (!m.parts || m.parts.length === 0)
                 return (
                   <div key={m.id ?? i} className={`group relative rounded-xl px-3 py-2 text-sm ${isUser ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
                     <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                    {isUser
-                      ? <UserText text={m.content} />
-                      : <div className="whitespace-pre-wrap break-words">{cleanText(m.content) || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>}
-                    {(actions.length > 0 || showWriting) && (
-                      <div className="mt-2 flex flex-col gap-1">
-                        {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={(p) => { setSelected(p); setTab('code') }} />)}
+                    {isUser ? (
+                      <UserText text={m.content} />
+                    ) : m.parts ? (
+                      // Inline timeline: text and tool pills in the exact order they happened.
+                      <div className="flex flex-col gap-1.5">
+                        {m.parts.map((part, k) => part.type === 'text'
+                          ? (cleanText(part.text) ? <div key={k} className="whitespace-pre-wrap break-words">{cleanText(part.text)}</div> : null)
+                          : <ActionPill key={k} action={part.action} onOpen={openInCode} />)}
+                        {empty && running && isLast && !showWriting && <div className="text-muted-foreground">Thinking…</div>}
                         {showWriting && (
                           <span className="flex items-center gap-1.5 self-start rounded-md border border-signal/40 bg-signal-muted px-2 py-1 font-mono text-[11px] text-signal">
                             <Loader2 className="size-3 animate-spin" /> writing {writing}…
                           </span>
                         )}
                       </div>
+                    ) : (
+                      // Legacy messages (pre-timeline): prose then grouped pills.
+                      <>
+                        <div className="whitespace-pre-wrap break-words">{cleanText(m.content)}</div>
+                        {actions.length > 0 && (
+                          <div className="mt-2 flex flex-col gap-1">
+                            {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={openInCode} />)}
+                          </div>
+                        )}
+                      </>
                     )}
                     {showActionRow && (
                       <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
