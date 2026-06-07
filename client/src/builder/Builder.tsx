@@ -277,7 +277,7 @@ export function Builder() {
                 return (
                   <div key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
                     <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                    <div className="whitespace-pre-wrap break-words">{m.content || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>
+                    <div className="whitespace-pre-wrap break-words">{cleanText(m.content) || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>
                     {(actions.length > 0 || showWriting) && (
                       <div className="mt-2 flex flex-col gap-1">
                         {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={(p) => { setSelected(p); setTab('code') }} />)}
@@ -362,6 +362,13 @@ export function Builder() {
       )}
     </div>
   )
+}
+
+// Collapse the agent's narration: trim and squash runs of blank lines (it can
+// accumulate many newlines across tool turns, which whitespace-pre-wrap would
+// otherwise render as a big empty gap before the action pills).
+function cleanText(s: string): string {
+  return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 // A single agent action rendered as an inline pill. File/image/delete pills open
