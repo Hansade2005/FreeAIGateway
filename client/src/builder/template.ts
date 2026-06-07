@@ -1,6 +1,51 @@
 import type { FileSystemTree } from '@webcontainer/api'
 import { PACKAGE_LOCK } from './template-lock'
 
+// Bridge injected into the preview: forwards console output + errors to the
+// builder and answers DOM / screenshot requests over postMessage. Shipped in the
+// template's index.html AND injected into older projects that predate it.
+export const PREVIEW_BRIDGE = `<script>
+  (function () {
+    function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
+    function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
+    ['log', 'info', 'warn', 'error'].forEach(function (level) {
+      var orig = console[level];
+      console[level] = function () {
+        try {
+          var text = Array.prototype.map.call(arguments, function (a) { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); } }).join(' ');
+          post({ __fagConsole: true, level: level, text: text });
+        } catch (e) {}
+        return orig.apply(console, arguments);
+      };
+    });
+    window.addEventListener('error', function (e) { send('error', e.message, e.error && e.error.stack); });
+    window.addEventListener('unhandledrejection', function (e) { send('unhandledrejection', (e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack); });
+    window.addEventListener('message', function (e) {
+      var d = e.data || {};
+      if (d.__fagReq === 'dom') {
+        var html = (document.documentElement && document.documentElement.outerHTML) || '';
+        post({ __fagRes: 'dom', id: d.id, html: html.length > 16000 ? html.slice(0, 16000) + '\\n<!-- …truncated… -->' : html });
+      } else if (d.__fagReq === 'shot') {
+        (async function () {
+          try {
+            var mod = await import('https://esm.sh/html2canvas@1.4.1');
+            var h2c = mod.default || mod;
+            var canvas = await h2c(document.body, { logging: false, useCORS: true, scale: 0.6, backgroundColor: null });
+            post({ __fagRes: 'shot', id: d.id, dataUrl: canvas.toDataURL('image/jpeg', 0.7) });
+          } catch (err) { post({ __fagRes: 'shot', id: d.id, error: String((err && err.message) || err) }); }
+        })();
+      }
+    });
+  })();
+</script>`
+
+// Ensure the preview bridge is present in a project's index.html (older projects
+// created before the bridge existed don't have it → DOM/screenshot would hang).
+export function ensureBridge(html: string): string {
+  if (!html || html.includes('__fagReq')) return html
+  return html.includes('</head>') ? html.replace('</head>', `  ${PREVIEW_BRIDGE}\n  </head>`) : PREVIEW_BRIDGE + html
+}
+
 // The starter project the agent edits: Vite + React 18 + Tailwind v4. Kept
 // deliberately small so free models can reason over the whole thing. The agent
 // rewrites/creates files under src/ (and may add deps to package.json).
@@ -45,42 +90,7 @@ export default defineConfig({
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
-    <script>
-      // Bridge between the running app and the builder: forwards console output
-      // and errors, and answers DOM / screenshot requests over postMessage.
-      (function () {
-        function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
-        function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
-        ['log', 'info', 'warn', 'error'].forEach(function (level) {
-          var orig = console[level];
-          console[level] = function () {
-            try {
-              var text = Array.prototype.map.call(arguments, function (a) { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); } }).join(' ');
-              post({ __fagConsole: true, level: level, text: text });
-            } catch (e) {}
-            return orig.apply(console, arguments);
-          };
-        });
-        window.addEventListener('error', function (e) { send('error', e.message, e.error && e.error.stack); });
-        window.addEventListener('unhandledrejection', function (e) { send('unhandledrejection', (e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack); });
-        window.addEventListener('message', function (e) {
-          var d = e.data || {};
-          if (d.__fagReq === 'dom') {
-            var html = (document.documentElement && document.documentElement.outerHTML) || '';
-            post({ __fagRes: 'dom', id: d.id, html: html.length > 16000 ? html.slice(0, 16000) + '\\n<!-- …truncated… -->' : html });
-          } else if (d.__fagReq === 'shot') {
-            (async function () {
-              try {
-                var mod = await import('https://esm.sh/html2canvas@1.4.1');
-                var h2c = mod.default || mod;
-                var canvas = await h2c(document.body, { logging: false, useCORS: true, scale: 0.6, backgroundColor: null });
-                post({ __fagRes: 'shot', id: d.id, dataUrl: canvas.toDataURL('image/jpeg', 0.7) });
-              } catch (err) { post({ __fagRes: 'shot', id: d.id, error: String((err && err.message) || err) }); }
-            })();
-          }
-        });
-      })();
-    </script>
+    ${PREVIEW_BRIDGE}
   </head>
   <body>
     <div id="root"></div>

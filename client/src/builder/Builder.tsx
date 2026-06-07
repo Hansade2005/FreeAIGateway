@@ -6,7 +6,7 @@ import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
 import { CodeView } from './CodeView'
 import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
-import { STARTER_FILES } from './template'
+import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message, type StoredAction, type MessagePart,
@@ -90,6 +90,13 @@ export function Builder() {
       let proj = (lastId && (await getProject(lastId))) || all[0] || null
       if (!proj) proj = await createProject('My app', { ...STARTER_FILES })
       localStorage.setItem(LAST_KEY, proj.id)
+      // Older projects predate the preview bridge — inject it so read_dom /
+      // screenshot work (otherwise they hang/time out).
+      const patchedHtml = ensureBridge(proj.files['index.html'] || '')
+      if (patchedHtml && patchedHtml !== proj.files['index.html']) {
+        proj.files = { ...proj.files, 'index.html': patchedHtml }
+        await saveFiles(proj.id, proj.files)
+      }
       setProject(proj)
       filesRef.current = proj.files
       assetsRef.current = proj.assets ?? {}
