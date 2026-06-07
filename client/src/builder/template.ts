@@ -46,13 +46,39 @@ export default defineConfig({
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>App</title>
     <script>
-      // Report uncaught errors to the builder (parent window) for auto-fix.
+      // Bridge between the running app and the builder: forwards console output
+      // and errors, and answers DOM / screenshot requests over postMessage.
       (function () {
-        function send(kind, msg, stack) {
-          try { parent.postMessage({ __fagPreview: true, kind: kind, message: String(msg), stack: stack ? String(stack) : '' }, '*'); } catch (e) {}
-        }
+        function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
+        function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
+        ['log', 'info', 'warn', 'error'].forEach(function (level) {
+          var orig = console[level];
+          console[level] = function () {
+            try {
+              var text = Array.prototype.map.call(arguments, function (a) { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (e) { return String(a); } }).join(' ');
+              post({ __fagConsole: true, level: level, text: text });
+            } catch (e) {}
+            return orig.apply(console, arguments);
+          };
+        });
         window.addEventListener('error', function (e) { send('error', e.message, e.error && e.error.stack); });
         window.addEventListener('unhandledrejection', function (e) { send('unhandledrejection', (e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack); });
+        window.addEventListener('message', function (e) {
+          var d = e.data || {};
+          if (d.__fagReq === 'dom') {
+            var html = (document.documentElement && document.documentElement.outerHTML) || '';
+            post({ __fagRes: 'dom', id: d.id, html: html.length > 16000 ? html.slice(0, 16000) + '\\n<!-- …truncated… -->' : html });
+          } else if (d.__fagReq === 'shot') {
+            (async function () {
+              try {
+                var mod = await import('https://esm.sh/html2canvas@1.4.1');
+                var h2c = mod.default || mod;
+                var canvas = await h2c(document.body, { logging: false, useCORS: true, scale: 0.6, backgroundColor: null });
+                post({ __fagRes: 'shot', id: d.id, dataUrl: canvas.toDataURL('image/jpeg', 0.7) });
+              } catch (err) { post({ __fagRes: 'shot', id: d.id, error: String((err && err.message) || err) }); }
+            })();
+          }
+        });
       })();
     </script>
   </head>

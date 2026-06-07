@@ -3,9 +3,11 @@
 
 const TOKEN_KEY = 'freellmapi_dashboard_token'
 
+export type ContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMsg {
   role: 'system' | 'user' | 'assistant' | 'tool'
-  content: string
+  content: string | ContentPart[]
   tool_calls?: ToolCall[]
   tool_call_id?: string
 }
