@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -10,7 +10,7 @@ import { STARTER_FILES } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message, type StoredAction,
-  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -28,6 +28,7 @@ export function Builder() {
   const [tab, setTab] = useState<'preview' | 'code'>('preview')
   const [selected, setSelected] = useState('src/App.jsx')
   const [writing, setWriting] = useState('')
+  const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [fatal, setFatal] = useState('')
 
   const ws = useRef<Workspace | null>(null)
@@ -111,9 +112,12 @@ export function Builder() {
     setInput('')
     setRunning(true)
     setWriting('')
-    const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, createdAt: Date.now() }
+    // Snapshot the project as it is now (before the agent runs) so this user
+    // message becomes a restorable checkpoint.
+    const checkpoint = { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
+    const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, checkpoint, createdAt: Date.now() }
     setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], createdAt: Date.now() }])
-    await addMessage({ projectId: project.id, role: 'user', content: prompt })
+    await addMessage({ projectId: project.id, role: 'user', content: prompt, checkpoint })
 
     const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
     const recentErrors = errors
@@ -173,12 +177,48 @@ export function Builder() {
         setWriting('')
         if (content.trim() || acts.length) await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts })
         await saveFiles(project.id, filesRef.current)
+        // Reload from DB so messages carry their ids + checkpoints (enables the
+        // copy / delete / restore actions).
+        setMessages(await getMessages(project.id))
         setRunning(false)
       },
     })
   }
 
   function stop() { sub.current?.unsubscribe(); setRunning(false) }
+
+  async function copyMessage(text: string, i: number) {
+    try { await navigator.clipboard.writeText(text) } catch { /* ignore */ }
+    setCopiedIdx(i); setTimeout(() => setCopiedIdx((c) => (c === i ? null : c)), 1400)
+  }
+
+  async function deleteMsg(m: Message, i: number) {
+    if (m.id != null) await deleteMessage(m.id)
+    setMessages((ms) => ms.filter((_, idx) => idx !== i))
+  }
+
+  // Roll the codebase back to a user message's checkpoint and drop everything
+  // after it (in the sandbox, the UI, and the DB).
+  async function restoreCheckpoint(m: Message, i: number) {
+    if (!project || !m.checkpoint || running) return
+    if (!confirm('Restore the code to this point? Changes and messages after it will be discarded.')) return
+    const cp = m.checkpoint
+    const keep = new Set([...Object.keys(cp.files), ...Object.keys(cp.assets ?? {})])
+    // remove files/assets added since the checkpoint
+    for (const p of [...Object.keys(filesRef.current), ...Object.keys(assetsRef.current)]) {
+      if (!keep.has(p)) await ws.current?.deleteFile(p).catch(() => {})
+    }
+    filesRef.current = { ...cp.files }
+    assetsRef.current = { ...(cp.assets ?? {}) }
+    setFiles(filesRef.current)
+    for (const [p, c] of Object.entries(cp.files)) await ws.current?.writeFile(p, c).catch(() => {})
+    for (const [p, b] of Object.entries(cp.assets ?? {})) await ws.current?.writeBinary(p, b).catch(() => {})
+    await saveFiles(project.id, filesRef.current)
+    await saveAssets(project.id, assetsRef.current)
+    await deleteMessagesAfter(project.id, m.createdAt)
+    setMessages((ms) => ms.slice(0, i + 1))
+    setErrors('')
+  }
 
   // Manual edit of the selected file → write to the running sandbox + persist.
   async function saveDraft() {
@@ -271,13 +311,17 @@ export function Builder() {
                 </div>
               )}
               {messages.map((m, i) => {
+                const isUser = m.role === 'user'
                 const isLast = i === messages.length - 1
                 const actions = m.actions ?? []
-                const showWriting = m.role === 'assistant' && running && isLast && writing
+                const showWriting = m.role === 'assistant' && running && isLast && !!writing
+                const showActionRow = !running || !isLast
                 return (
-                  <div key={i} className={`rounded-xl px-3 py-2 text-sm ${m.role === 'user' ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
+                  <div key={m.id ?? i} className={`group relative rounded-xl px-3 py-2 text-sm ${isUser ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
                     <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                    <div className="whitespace-pre-wrap break-words">{cleanText(m.content) || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>
+                    {isUser
+                      ? <UserText text={m.content} />
+                      : <div className="whitespace-pre-wrap break-words">{cleanText(m.content) || (running && isLast && actions.length === 0 && !showWriting ? 'Thinking…' : '')}</div>}
                     {(actions.length > 0 || showWriting) && (
                       <div className="mt-2 flex flex-col gap-1">
                         {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={(p) => { setSelected(p); setTab('code') }} />)}
@@ -286,6 +330,17 @@ export function Builder() {
                             <Loader2 className="size-3 animate-spin" /> writing {writing}…
                           </span>
                         )}
+                      </div>
+                    )}
+                    {showActionRow && (
+                      <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MsgIcon title={copiedIdx === i ? 'Copied' : 'Copy'} onClick={() => copyMessage(m.content, i)}>
+                          {copiedIdx === i ? <Check className="size-3 text-signal" /> : <Copy className="size-3" />}
+                        </MsgIcon>
+                        {isUser && m.checkpoint && (
+                          <MsgIcon title="Restore code to here" onClick={() => restoreCheckpoint(m, i)}><RotateCcw className="size-3" /></MsgIcon>
+                        )}
+                        <MsgIcon title="Delete message" onClick={() => deleteMsg(m, i)}><Trash2 className="size-3" /></MsgIcon>
                       </div>
                     )}
                   </div>
@@ -369,6 +424,34 @@ export function Builder() {
 // otherwise render as a big empty gap before the action pills).
 function cleanText(s: string): string {
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+const TRUNCATE_AT = 128
+
+// User messages over ~128 chars are clamped with a Show more toggle that expands
+// into a scrollable box.
+function UserText({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  if (text.length <= TRUNCATE_AT) return <div className="whitespace-pre-wrap break-words">{text}</div>
+  return (
+    <div>
+      <div className={`whitespace-pre-wrap break-words ${open ? 'max-h-48 overflow-y-auto pr-1' : ''}`}>
+        {open ? text : text.slice(0, TRUNCATE_AT).trimEnd() + '…'}
+      </div>
+      <button onClick={() => setOpen((o) => !o)} className="mt-1 text-[11px] font-medium text-signal hover:underline">
+        {open ? 'Show less' : 'Show more'}
+      </button>
+    </div>
+  )
+}
+
+// Small ghost icon button used in the per-message action row.
+function MsgIcon({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button title={title} onClick={onClick} className="rounded p-1 text-muted-foreground hover:bg-surface-2 hover:text-foreground">
+      {children}
+    </button>
+  )
 }
 
 // A single agent action rendered as an inline pill. File/image/delete pills open

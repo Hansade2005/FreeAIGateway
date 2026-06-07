@@ -17,12 +17,17 @@ export interface Project {
 // survive a reload.
 export interface StoredAction { kind: string; label: string; path?: string }
 
+// Snapshot of the project taken when a user message is sent (BEFORE the agent
+// runs), so the user can roll the codebase back to that point.
+export interface Checkpoint { files: Record<string, string>; assets?: Record<string, Uint8Array> }
+
 export interface Message {
   id?: number
   projectId: string
   role: 'user' | 'assistant'
   content: string
   actions?: StoredAction[]
+  checkpoint?: Checkpoint
   createdAt: number
 }
 
@@ -101,6 +106,15 @@ export async function addMessage(m: Omit<Message, 'id' | 'createdAt'>): Promise<
 
 export async function getMessages(projectId: string): Promise<Message[]> {
   return db.messages.where('projectId').equals(projectId).sortBy('createdAt')
+}
+
+export async function deleteMessage(id: number): Promise<void> {
+  await db.messages.delete(id)
+}
+
+// Delete every message in the project newer than `createdAt` (used by restore).
+export async function deleteMessagesAfter(projectId: string, createdAt: number): Promise<void> {
+  await db.messages.where('projectId').equals(projectId).and((m) => m.createdAt > createdAt).delete()
 }
 
 export async function saveDeploy(name: string, files: Record<string, Uint8Array>): Promise<string> {
