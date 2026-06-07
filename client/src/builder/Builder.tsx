@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -38,8 +38,23 @@ export function Builder() {
   const [draft, setDraft] = useState<string | null>(null) // editable buffer for the selected file
   const sub = useRef<Subscription | null>(null)
   const logRef = useRef('')
+  const consoleRef = useRef<string[]>([])           // app console output + runtime errors
+  const previewIframeRef = useRef<HTMLIFrameElement>(null)
+  const pendingReqs = useRef<Map<string, (v: any) => void>>(new Map())
   const chatEnd = useRef<HTMLDivElement>(null)
   const booted = useRef(false)
+
+  // Ask the preview (cross-origin iframe) for its DOM / a screenshot via postMessage.
+  function requestFromPreview(type: 'dom' | 'shot', timeout = 20000): Promise<any> {
+    return new Promise((resolve) => {
+      const win = previewIframeRef.current?.contentWindow
+      if (!win) return resolve({ error: 'preview not running' })
+      const id = Math.random().toString(36).slice(2)
+      const timer = setTimeout(() => { pendingReqs.current.delete(id); resolve({ error: 'timed out' }) }, timeout)
+      pendingReqs.current.set(id, (v) => { clearTimeout(timer); resolve(v) })
+      win.postMessage({ __fagReq: type, id }, '*')
+    })
+  }
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, running])
 
@@ -48,12 +63,21 @@ export function Builder() {
     booted.current = true
     resolveBuilderModel().then(setModel)
 
-    // Capture uncaught errors from the preview iframe (for the auto-fix loop).
+    // Messages from the preview iframe: errors, console output, and replies to
+    // our DOM/screenshot requests.
+    const pushLog = (line: string) => { consoleRef.current.push(line); if (consoleRef.current.length > 300) consoleRef.current.shift() }
     const onMsg = (e: MessageEvent) => {
       const d: any = e.data
-      if (d && d.__fagPreview) {
+      if (!d) return
+      if (d.__fagPreview) {
         const line = `[${d.kind}] ${d.message}${d.stack ? '\n' + String(d.stack).split('\n').slice(0, 3).join('\n') : ''}`
+        pushLog(line)
         setErrors((p) => (p + '\n' + line).slice(-3000))
+      } else if (d.__fagConsole) {
+        pushLog(`[${d.level}] ${d.text}`)
+      } else if (d.__fagRes && d.id) {
+        const resolve = pendingReqs.current.get(d.id)
+        if (resolve) { resolve(d); pendingReqs.current.delete(d.id) }
       }
     }
     window.addEventListener('message', onMsg)
@@ -138,6 +162,17 @@ export function Builder() {
           setFiles(filesRef.current)
           await ws.current?.writeFile(path, c)
         },
+        editFile: async (path, find, replace, replaceAll) => {
+          const cur = filesRef.current[path] ?? (await ws.current?.readFile(path)) ?? null
+          if (cur == null) return { ok: false, count: 0, message: `not found: ${path}` }
+          if (!cur.includes(find)) return { ok: false, count: 0, message: `text not found in ${path}` }
+          const count = replaceAll ? cur.split(find).length - 1 : 1
+          const next = replaceAll ? cur.split(find).join(replace) : cur.replace(find, replace)
+          filesRef.current = { ...filesRef.current, [path]: next }
+          setFiles(filesRef.current)
+          await ws.current?.writeFile(path, next)
+          return { ok: true, count }
+        },
         readFile: async (path) => filesRef.current[path] ?? (await ws.current?.readFile(path)) ?? null,
         listFiles: () => Object.keys(filesRef.current),
         deleteFile: async (path) => {
@@ -158,6 +193,9 @@ export function Builder() {
           if (/\bnpm\s+(install|i|add)\b/.test(command) && r.exitCode === 0) ws.current?.recacheDeps().catch(() => {})
           return r
         },
+        getConsoleLogs: async () => consoleRef.current.slice(-100).join('\n') || '(no console output yet)',
+        readDom: async () => { const r = await requestFromPreview('dom'); return r.html ?? `(could not read DOM: ${r.error ?? 'unknown'})` },
+        screenshot: async () => { const r = await requestFromPreview('shot', 30000); return { dataUrl: r.dataUrl, error: r.error } },
       },
     }).subscribe({
       next: (ev) => {
@@ -397,7 +435,7 @@ export function Builder() {
               {tab === 'preview' ? (
                 <div className="size-full bg-white">
                   {previewUrl
-                    ? <iframe title="preview" src={previewUrl} className="size-full border-0" allow="cross-origin-isolated" />
+                    ? <iframe ref={previewIframeRef} title="preview" src={previewUrl} className="size-full border-0" allow="cross-origin-isolated" />
                     : <div className="grid h-full place-items-center text-sm text-muted-foreground">{statusLabel[status]}</div>}
                 </div>
               ) : (
@@ -461,8 +499,9 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
   if (action.kind === 'command') {
     return <span className={`${base} text-muted-foreground`}><TerminalSquare className="size-3 text-signal" /><span className="truncate">$ {action.label.replace(/^\$ /, '')}</span></span>
   }
-  if (action.kind === 'read' || action.kind === 'list') {
-    return <span className={`${base} text-muted-foreground/60`}><FileSearch className="size-3" /><span className="truncate">{action.label}</span></span>
+  if (action.kind === 'read' || action.kind === 'list' || action.kind === 'console' || action.kind === 'dom' || action.kind === 'screenshot') {
+    const Ico = action.kind === 'console' ? ScrollText : action.kind === 'screenshot' ? Camera : action.kind === 'dom' ? Code2 : FileSearch
+    return <span className={`${base} text-muted-foreground/60`}><Ico className="size-3" /><span className="truncate">{action.label}</span></span>
   }
   const Icon = action.kind === 'image' ? ImageIcon : action.kind === 'delete' ? Trash2 : FileText
   return (
