@@ -66,8 +66,12 @@ export class Workspace {
       if (snap) {
         this.setStatus('installing')
         this.cb.onOutput?.('Restoring cached node_modules…\n')
+        // The mount point must exist before mounting into it.
+        await this.wc.fs.mkdir('node_modules', { recursive: true }).catch(() => {})
         await this.wc.mount(snap, { mountPoint: 'node_modules' })
-        restored = true
+        // Verify the restore actually populated deps; if not, fall through to install.
+        const entries = await this.wc.fs.readdir('node_modules').catch(() => [] as string[])
+        restored = entries.length > 3
       }
     } catch { restored = false }
 
