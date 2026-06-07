@@ -23,17 +23,39 @@ export interface ProjectContext {
   recentErrors?: string
 }
 
-// Compact context: the current files (apps are small) + any recent runtime/build
-// errors so the model can self-correct. For larger projects it can read_file more.
+const INLINE_ALL_BUDGET = 12000  // ≤ this total → inline every file (fast, no reads)
+const PER_FILE_INLINE_MAX = 2500 // in big projects, still inline files under this
+const PARTIAL_INLINE_BUDGET = 8000
+
+// Size-aware context. Small projects are inlined whole so the agent edits without
+// extra round-trips. Once a project grows, only the small files are inlined and
+// the rest are listed — the agent uses read_file to pull what it needs, so token
+// use and latency stay flat as the project scales.
 export function buildContextMessage(ctx: ProjectContext): string {
-  const fileList = Object.keys(ctx.files).filter((p) => p !== 'package-lock.json').sort().join(', ')
-  const blocks = Object.entries(ctx.files)
+  const files = Object.entries(ctx.files)
     .filter(([p]) => !p.startsWith('node_modules') && p !== 'package-lock.json')
-    .map(([p, c]) => `### ${p}\n\`\`\`\n${c.length > 8000 ? c.slice(0, 8000) + '\n/* …truncated — use read_file for the rest … */' : c}\n\`\`\``)
-    .join('\n')
-  let msg = `Current project files (${fileList}):\n\n${blocks}`
-  if (ctx.recentErrors?.trim()) {
-    msg += `\n\nThe app currently has these errors — fix them:\n\`\`\`\n${ctx.recentErrors.trim().slice(-2000)}\n\`\`\``
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  const total = files.reduce((n, [, c]) => n + c.length, 0)
+  const block = ([p, c]: [string, string]) => `### ${p}\n\`\`\`\n${c}\n\`\`\``
+
+  let body: string
+  if (total <= INLINE_ALL_BUDGET) {
+    body = `Current project files (${files.length}):\n\n${files.map(block).join('\n')}`
+  } else {
+    const inlined: [string, string][] = []
+    const listed: [string, string][] = []
+    let used = 0
+    for (const f of files) {
+      if (f[1].length <= PER_FILE_INLINE_MAX && used + f[1].length <= PARTIAL_INLINE_BUDGET) { inlined.push(f); used += f[1].length }
+      else listed.push(f)
+    }
+    body = `This project has ${files.length} files (~${Math.round(total / 1000)}KB) — too large to inline fully. The smaller files are shown below; for any OTHER file, call read_file BEFORE editing it.\n\n`
+      + inlined.map(block).join('\n')
+      + `\n\nOther files (use read_file to read them):\n${listed.map(([p, c]) => `- ${p} (${c.length} bytes)`).join('\n')}`
   }
-  return msg
+
+  if (ctx.recentErrors?.trim()) {
+    body += `\n\nThe app currently has these errors — fix them:\n\`\`\`\n${ctx.recentErrors.trim().slice(-2000)}\n\`\`\``
+  }
+  return body
 }
