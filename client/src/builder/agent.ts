@@ -46,7 +46,10 @@ export interface AgentRun {
   exec: Executors
 }
 
-const MAX_STEPS = 8
+// Safety ceiling only — high enough to never cut off a real build. The agent
+// normally finishes on its own (a turn with no tool calls); the Stop button
+// gives manual control. Bumped from 8, which truncated larger apps.
+const MAX_STEPS = 60
 const norm = (p: string) => p.trim().replace(/^\.?\//, '')
 
 export function runAgent(run: AgentRun): Observable<AgentEvent> {
