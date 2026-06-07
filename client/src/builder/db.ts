@@ -15,7 +15,7 @@ export interface Project {
 
 // A compact record of a tool action, persisted so the chat's action pills
 // survive a reload.
-export interface StoredAction { kind: string; label: string; path?: string }
+export interface StoredAction { kind: string; label: string; path?: string; output?: string }
 
 // Snapshot of the project taken when a user message is sent (BEFORE the agent
 // runs), so the user can roll the codebase back to that point.
