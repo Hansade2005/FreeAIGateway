@@ -58,13 +58,10 @@ export function Builder() {
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, running])
 
+  // Preview→builder channel: errors, console output, and replies to our DOM /
+  // screenshot requests. Its OWN effect (not behind the boot guard) so React
+  // StrictMode's mount→unmount→remount in dev re-attaches it correctly.
   useEffect(() => {
-    if (booted.current) return
-    booted.current = true
-    resolveBuilderModel().then(setModel)
-
-    // Messages from the preview iframe: errors, console output, and replies to
-    // our DOM/screenshot requests.
     const pushLog = (line: string) => { consoleRef.current.push(line); if (consoleRef.current.length > 300) consoleRef.current.shift() }
     const onMsg = (e: MessageEvent) => {
       const d: any = e.data
@@ -81,6 +78,13 @@ export function Builder() {
       }
     }
     window.addEventListener('message', onMsg)
+    return () => window.removeEventListener('message', onMsg)
+  }, [])
+
+  useEffect(() => {
+    if (booted.current) return
+    booted.current = true
+    resolveBuilderModel().then(setModel)
 
     ;(async () => {
       if (!self.crossOriginIsolated) { setFatal('This page is not cross-origin isolated, so the in-browser runtime can’t start. Open /builder directly (it sets the required headers).'); return }
@@ -105,7 +109,7 @@ export function Builder() {
       await boot(proj.files, assetsRef.current)
     })().catch((e) => setFatal(e?.message ?? String(e)))
 
-    return () => { window.removeEventListener('message', onMsg); sub.current?.unsubscribe() }
+    return () => { sub.current?.unsubscribe() }
   }, [])
 
   async function boot(initial: Record<string, string>, assets: Record<string, Uint8Array> = {}) {
