@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -492,22 +492,45 @@ function MsgIcon({ title, onClick, children }: { title: string; onClick: () => v
   )
 }
 
-// A single agent action rendered as an inline pill. File/image/delete pills open
-// the target in the Code tab; command/read/list are informational.
+// Hard-truncate pill text so long paths/commands never overflow the chat column.
+const pillText = (s: string, n = 22) => (s.length > n ? s.slice(0, n) + '…' : s)
+
+// A single agent action rendered as an inline pill. File/image/delete open the
+// target in Code; command pills are collapsible to reveal their output.
 function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: string) => void }) {
+  const [open, setOpen] = useState(false)
   const base = 'flex items-center gap-1.5 self-start rounded-md border bg-surface-2 px-2 py-1 font-mono text-[11px]'
+
   if (action.kind === 'command') {
-    return <span className={`${base} text-muted-foreground`}><TerminalSquare className="size-3 text-signal" /><span className="truncate">$ {action.label.replace(/^\$ /, '')}</span></span>
+    const cmd = action.label.replace(/^\$ /, '')
+    return (
+      <div className="self-start">
+        <button
+          onClick={() => action.output && setOpen((o) => !o)}
+          className={`${base} text-muted-foreground ${action.output ? 'hover:text-foreground' : ''}`}
+          title={cmd}
+        >
+          <TerminalSquare className="size-3 shrink-0 text-signal" />
+          <span>$ {pillText(cmd)}</span>
+          {action.output && <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />}
+        </button>
+        {open && action.output && (
+          <pre className="mt-1 max-h-52 max-w-[340px] overflow-auto whitespace-pre-wrap rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>
+        )}
+      </div>
+    )
   }
+
   if (action.kind === 'read' || action.kind === 'list' || action.kind === 'console' || action.kind === 'dom' || action.kind === 'screenshot') {
     const Ico = action.kind === 'console' ? ScrollText : action.kind === 'screenshot' ? Camera : action.kind === 'dom' ? Code2 : FileSearch
-    return <span className={`${base} text-muted-foreground/60`}><Ico className="size-3" /><span className="truncate">{action.label}</span></span>
+    return <span className={`${base} text-muted-foreground/60`} title={action.label}><Ico className="size-3 shrink-0" /><span>{pillText(action.label)}</span></span>
   }
+
   const Icon = action.kind === 'image' ? ImageIcon : action.kind === 'delete' ? Trash2 : FileText
   return (
-    <button onClick={() => action.path && onOpen(action.path)} className={`${base} text-muted-foreground hover:text-foreground`} title="Open in Code">
-      <Icon className={`size-3 ${action.kind === 'delete' ? 'text-destructive' : 'text-signal'}`} />
-      <span className="truncate">{action.label}</span>
+    <button onClick={() => action.path && onOpen(action.path)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
+      <Icon className={`size-3 shrink-0 ${action.kind === 'delete' ? 'text-destructive' : 'text-signal'}`} />
+      <span>{pillText(action.label)}</span>
     </button>
   )
 }

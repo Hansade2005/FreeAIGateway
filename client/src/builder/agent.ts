@@ -20,7 +20,7 @@ export const BUILDER_TOOLS: ToolDef[] = [
 ]
 
 export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot'
-export interface AgentAction { kind: ActionKind; label: string; path?: string }
+export interface AgentAction { kind: ActionKind; label: string; path?: string; output?: string }
 
 export type AgentEvent =
   | { type: 'status'; status: string }
@@ -175,9 +175,10 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
       }
       case 'run_command': {
         const command = String(args.command ?? '')
-        sub.next({ type: 'action', action: { kind: 'command', label: command, path: command } })
         const r = await ex.runCommand(command)
-        return { content: `$ ${command}\n(exit ${r.exitCode})\n${r.output || '(no output)'}` }
+        const out = `(exit ${r.exitCode})\n${r.output || '(no output)'}`.slice(-2000)
+        sub.next({ type: 'action', action: { kind: 'command', label: command, path: command, output: out } })
+        return { content: `$ ${command}\n${out}` }
       }
       case 'get_console_logs': {
         sub.next({ type: 'action', action: { kind: 'console', label: 'read console' } })
