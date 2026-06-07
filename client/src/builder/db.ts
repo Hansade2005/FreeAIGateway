@@ -15,7 +15,7 @@ export interface Project {
 
 // A compact record of a tool action, persisted so the chat's action pills
 // survive a reload.
-export interface StoredAction { kind: string; label: string; path?: string; output?: string }
+export interface StoredAction { kind: string; label: string; path?: string; output?: string; image?: string }
 
 // An assistant turn is an ordered timeline of text and tool actions, so the UI
 // can render each tool pill inline at the exact point it happened.

@@ -556,8 +556,9 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
 
   const label = action.kind === 'command' ? '$ ' + pillText(action.label.replace(/^\$ /, '')) : pillText(action.label)
 
-  // Anything with captured output → collapsible (terminal, console, dom, read).
-  if (action.output) {
+  // Anything with captured output/image → collapsible (terminal, console, dom,
+  // read, screenshot).
+  if (action.output || action.image) {
     return (
       <div className="self-start">
         <button onClick={() => setOpen((o) => !o)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
@@ -565,9 +566,9 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
           <span>{label}</span>
           <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
-        {open && (
-          <pre className="mt-1 max-h-52 max-w-[340px] overflow-auto whitespace-pre-wrap rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>
-        )}
+        {open && (action.image
+          ? <img src={action.image} alt="screenshot" className="mt-1 max-h-60 max-w-[340px] rounded-md border" />
+          : <pre className="mt-1 max-h-52 max-w-[340px] overflow-auto whitespace-pre-wrap rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>)}
       </div>
     )
   }

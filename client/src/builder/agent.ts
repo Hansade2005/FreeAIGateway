@@ -21,7 +21,7 @@ export const BUILDER_TOOLS: ToolDef[] = [
 ]
 
 export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot' | 'design'
-export interface AgentAction { kind: ActionKind; label: string; path?: string; output?: string }
+export interface AgentAction { kind: ActionKind; label: string; path?: string; output?: string; image?: string }
 
 export type AgentEvent =
   | { type: 'status'; status: string }
@@ -200,9 +200,12 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         return { content: dom }
       }
       case 'screenshot': {
-        sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot' } })
         const shot = await ex.screenshot()
-        if (shot.error || !shot.dataUrl) return { content: `screenshot failed: ${shot.error ?? 'no image'}` }
+        if (shot.error || !shot.dataUrl) {
+          sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot failed' } })
+          return { content: `screenshot failed: ${shot.error ?? 'no image'}` }
+        }
+        sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot', image: shot.dataUrl } })
         return { content: 'Screenshot captured — see the attached image of the rendered UI.', image: shot.dataUrl }
       }
       default:
