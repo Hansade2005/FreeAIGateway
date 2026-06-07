@@ -17,6 +17,10 @@ export interface Project {
 // survive a reload.
 export interface StoredAction { kind: string; label: string; path?: string; output?: string }
 
+// An assistant turn is an ordered timeline of text and tool actions, so the UI
+// can render each tool pill inline at the exact point it happened.
+export type MessagePart = { type: 'text'; text: string } | { type: 'action'; action: StoredAction }
+
 // Snapshot of the project taken when a user message is sent (BEFORE the agent
 // runs), so the user can roll the codebase back to that point.
 export interface Checkpoint { files: Record<string, string>; assets?: Record<string, Uint8Array> }
@@ -27,6 +31,7 @@ export interface Message {
   role: 'user' | 'assistant'
   content: string
   actions?: StoredAction[]
+  parts?: MessagePart[]
   checkpoint?: Checkpoint
   createdAt: number
 }
