@@ -885,7 +885,7 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
               {tab === 'preview' ? (
                 <div className="size-full bg-white">
                   {previewUrl
-                    ? <iframe ref={previewIframeRef} title="preview" src={previewUrl} className="size-full border-0" allow="cross-origin-isolated" />
+                    ? <iframe ref={previewIframeRef} title="preview" src={previewUrl} className="size-full border-0" />
                     : <div className="grid h-full place-items-center text-sm text-muted-foreground">{statusLabel[status]}</div>}
                 </div>
               ) : (
