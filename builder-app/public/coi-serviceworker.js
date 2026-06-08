@@ -26,6 +26,14 @@ if (typeof window === 'undefined') {
         if (r.cache === "only-if-cached" && r.mode !== "same-origin") {
             return;
         }
+        // Never isolate the /deploy page — it needs popup auth (Puter), which
+        // COOP same-origin would break. Let it load with its own (no-COI) headers.
+        try {
+            const u = new URL(r.url);
+            if (u.origin === self.location.origin && (u.pathname === "/deploy" || u.pathname.startsWith("/deploy.html"))) {
+                return;
+            }
+        } catch (e) { /* ignore */ }
 
         const request = (coepCredentialless && r.mode === "no-cors")
             ? new Request(r, { credentials: "omit" })

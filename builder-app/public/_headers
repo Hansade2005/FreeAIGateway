@@ -1,3 +1,7 @@
+/deploy
+  Cross-Origin-Opener-Policy: unsafe-none
+/deploy.html
+  Cross-Origin-Opener-Policy: unsafe-none
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
