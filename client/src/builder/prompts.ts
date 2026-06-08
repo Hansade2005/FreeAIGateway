@@ -16,8 +16,9 @@ TOOLS:
 - screenshot(): a visual capture of the running app — use it to inspect the UI's appearance.
 - web_search(query): search the web for current info — docs, libraries, APIs, examples. Returns titles, snippets, and links.
 - web_fetch(url): fetch a URL and read its content as text/markdown (e.g. open a docs page or a search result).
-- inspect_page(selector?): inspect the LIVE running app — an element's computed styles/attributes/rect/text (ground truth for styling bugs), or the page's url/title/text. Prefer this over guessing CSS from source.
-- click(selector) / fill(selector, value) / press_key(key, selector?) / scroll(to, selector?): drive the running app like a user to verify behavior (open menus, submit forms, navigate views) before and after a change.
+- snapshot(): a Playwright-style accessibility tree of the running app (roles + names + stable [ref=eN] handles). Call this FIRST to see what's on the page, then target elements by ref.
+- inspect_page(ref?/selector?): inspect the LIVE running app — an element's computed styles/attributes/rect/text (ground truth for styling bugs), or the page's url/title/text. Prefer this over guessing CSS from source.
+- click(ref/selector) / fill(ref/selector, value) / press_key(key, ref?/selector?) / scroll(to, ref?/selector?): drive the running app like a user to verify behavior. Prefer the ref from snapshot over CSS selectors.
 - evaluate(code): run arbitrary JS in the running app and get the result — the escape hatch for anything else (submit a form, read state, drive inner scrollbars).
 
 DEBUGGING: when something looks or behaves wrong, inspect before guessing — get_console_logs for errors, inspect_page(selector) for an element's real computed styles, read_dom/screenshot to see the output, and click/fill/press_key/evaluate to reproduce the interaction — then fix and verify by driving the app again.
