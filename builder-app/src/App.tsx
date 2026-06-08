@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Builder } from './builder/Builder'
 import { Settings } from './Settings'
 import { Home } from './Home'
@@ -16,17 +16,30 @@ function deriveName(prompt: string): string {
   return words.length > 42 ? words.slice(0, 42) + '…' : words
 }
 
+// The open project lives in the URL (?p=<id>) so a refresh stays in the
+// workspace and back/forward navigates between Home and a project.
+const urlProject = () => { try { return new URLSearchParams(location.search).get('p') } catch { return null } }
+
 export function App() {
   const [configured, setConfigured] = useState(isConfigured())
   const [editing, setEditing] = useState(false)
-  const [view, setView] = useState<'home' | 'builder'>('home')
-  const [projectId, setProjectId] = useState<string | null>(null)
+  const [projectId, setProjectId] = useState<string | null>(urlProject())
+
+  // Keep the project in LAST_KEY for the Builder on first load, and sync state
+  // with browser back/forward.
+  useEffect(() => {
+    if (projectId) localStorage.setItem(LAST_KEY, projectId)
+    const onPop = () => setProjectId(urlProject())
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   if (!configured) return <Settings onSaved={() => setConfigured(true)} />
 
   const open = (id: string) => {
     localStorage.setItem(LAST_KEY, id)
-    setProjectId(id); setView('builder')
+    history.pushState({ p: id }, '', '?p=' + encodeURIComponent(id))
+    setProjectId(id)
   }
   const startFromPrompt = async (prompt: string, frameworkId: string) => {
     const fw = getFramework(frameworkId)
@@ -35,7 +48,7 @@ export function App() {
     setPending(p.id, { prompt })
     open(p.id)
   }
-  const goHome = () => { setView('home'); setProjectId(null) }
+  const goHome = () => { history.pushState({}, '', location.pathname); setProjectId(null) }
 
   const settingsModal = editing && (
     // Provider/model changes take effect on reload (the agent reads the model at
@@ -43,7 +56,7 @@ export function App() {
     <Settings onSaved={() => location.reload()} onClose={() => setEditing(false)} />
   )
 
-  if (view === 'home') {
+  if (!projectId) {
     return (
       <>
         <Home onStart={startFromPrompt} onOpen={(id) => open(id)} onEditProvider={() => setEditing(true)} />
@@ -53,7 +66,7 @@ export function App() {
   }
   return (
     <>
-      <Builder key={projectId ?? 'builder'} onHome={goHome} onEditProvider={() => setEditing(true)} />
+      <Builder key={projectId} onHome={goHome} onEditProvider={() => setEditing(true)} />
       {settingsModal}
     </>
   )

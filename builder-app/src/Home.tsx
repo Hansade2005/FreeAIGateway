@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles, ArrowUp, Plus, Mic, FolderOpen } from 'lucide-react'
-import { listProjects, type Project } from './builder/db'
+import { Sparkles, ArrowUp, Plus, Mic, FolderOpen, Trash2 } from 'lucide-react'
+import { listProjects, deleteProject, type Project } from './builder/db'
 import { FRAMEWORK_LIST } from './builder/frameworks'
 import { getDailySuggestions, FALLBACK_SUGGESTIONS } from './a0'
 
@@ -34,6 +34,12 @@ export function Home({ onStart, onOpen, onEditProvider }: {
   useEffect(() => () => { try { recRef.current?.stop() } catch { /* ignore */ } }, [])
 
   const submit = () => { const v = prompt.trim(); if (v) onStart(v, framework) }
+
+  const remove = async (id: string, name: string) => {
+    if (!confirm(`Delete "${name}"? This removes the app and its chat history. Cannot be undone.`)) return
+    await deleteProject(id)
+    setProjects((ps) => ps.filter((p) => p.id !== id))
+  }
 
   const voice = () => {
     const W = window as any
@@ -124,17 +130,26 @@ export function Home({ onStart, onOpen, onEditProvider }: {
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {projects.map((p) => (
-                <button key={p.id} onClick={() => onOpen(p.id)} className="group overflow-hidden rounded-2xl border bg-surface-1 text-left transition-colors hover:border-signal/40">
-                  <div className="relative aspect-[16/9] overflow-hidden" style={{ background: gradientFor(p.id) }}>
-                    <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-black/40 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
-                      <FolderOpen className="size-3" /> open
-                    </span>
-                  </div>
-                  <div className="p-4">
-                    <h3 className="truncate text-sm font-medium">{p.name}</h3>
-                    <p className="text-xs text-muted-foreground">edited {timeAgo(p.updatedAt)}</p>
-                  </div>
-                </button>
+                <div key={p.id} className="group relative overflow-hidden rounded-2xl border bg-surface-1 transition-colors hover:border-signal/40">
+                  <button onClick={() => onOpen(p.id)} className="block w-full text-left">
+                    <div className="relative aspect-[16/9] overflow-hidden" style={{ background: gradientFor(p.id) }}>
+                      <span className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full bg-black/40 px-2 py-0.5 text-[11px] font-medium text-white backdrop-blur">
+                        <FolderOpen className="size-3" /> open
+                      </span>
+                    </div>
+                    <div className="p-4">
+                      <h3 className="truncate text-sm font-medium">{p.name}</h3>
+                      <p className="text-xs text-muted-foreground">edited {timeAgo(p.updatedAt)}</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); remove(p.id, p.name) }}
+                    title="Delete app"
+                    className="absolute right-2 top-2 grid size-7 place-items-center rounded-lg bg-black/40 text-white/80 opacity-0 backdrop-blur transition hover:bg-destructive hover:text-white group-hover:opacity-100"
+                  >
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
               ))}
             </div>
           )}
