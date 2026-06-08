@@ -736,7 +736,7 @@ export function Builder() {
                       <UserText text={m.content} />
                     ) : m.parts ? (
                       // Inline timeline: text and tool pills in the exact order they happened.
-                      <div className="flex flex-col gap-1.5">
+                      <div className="flex min-w-0 flex-col gap-1.5">
                         {m.parts.map((part, k) => part.type === 'text'
                           ? (cleanText(part.text) ? <Markdown key={k}>{cleanText(part.text)}</Markdown> : null)
                           : <ActionPill key={k} action={part.action} onOpen={openInCode} />)}
@@ -752,7 +752,7 @@ export function Builder() {
                       <>
                         <Markdown>{cleanText(m.content)}</Markdown>
                         {actions.length > 0 && (
-                          <div className="mt-2 flex flex-col gap-1">
+                          <div className="mt-2 flex min-w-0 flex-col gap-1">
                             {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={openInCode} />)}
                           </div>
                         )}
@@ -1065,15 +1065,17 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
   // read, screenshot).
   if (action.output || action.image) {
     return (
-      <div className="self-start">
-        <button onClick={() => setOpen((o) => !o)} className={`${base} text-muted-foreground hover:text-foreground`} title={action.label}>
+      <div className="min-w-0 max-w-full">
+        <button onClick={() => setOpen((o) => !o)} className={`${base} w-fit max-w-full text-muted-foreground hover:text-foreground`} title={action.label}>
           <Icon className={`size-3 shrink-0 ${action.kind === 'command' ? 'text-signal' : ''}`} />
-          <span>{label}</span>
+          <span className="truncate">{label}</span>
           <ChevronDown className={`size-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
         {open && (action.image
-          ? <img src={action.image} alt="screenshot" className="mt-1 max-h-60 max-w-[340px] rounded-md border" />
-          : <pre className="mt-1 max-h-52 max-w-[340px] overflow-auto whitespace-pre-wrap rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>)}
+          ? <img src={action.image} alt="screenshot" className="mt-1 max-h-60 max-w-full rounded-md border" />
+          // Stay inside the bubble: full bubble width, wrap long lines, and add
+          // both scrollbars (vertical via max-h, horizontal for unbreakable text).
+          : <pre className="mt-1 max-h-60 w-full max-w-full overflow-auto overflow-x-auto whitespace-pre-wrap break-words rounded-md border bg-surface-1 p-2 font-mono text-[10.5px] leading-relaxed text-muted-foreground">{action.output}</pre>)}
       </div>
     )
   }
