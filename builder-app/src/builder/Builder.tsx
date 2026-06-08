@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search, MousePointerClick, Brain } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search, MousePointerClick, Brain } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
 import { Markdown } from './Markdown'
@@ -15,7 +15,7 @@ import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message, type StoredAction, type MessagePart, type ProjectSettings, type Checkpoint,
-  createProject, getProject, listProjects, saveFiles, saveAssets, addMessage, getMessages, deleteMessages, renameProject, deleteProject, saveProjectSettings, saveLeaf, setMessageParent,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessages, renameProject, deleteProject, saveProjectSettings, saveLeaf, setMessageParent,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -600,6 +600,22 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
     setDraft(null)
   }
 
+  // Build in the sandbox, hand the dist off via IndexedDB, and open the
+  // (non-isolated) /deploy page where Puter auth + upload happen.
+  async function deploy() {
+    if (!project || running || status !== 'ready') return
+    try {
+      setStatus('installing')
+      const dist = await ws.current!.build()
+      const id = await saveDeploy(project.name, dist)
+      setStatus('ready')
+      window.open(`/deploy?id=${id}`, '_blank', 'noopener')
+    } catch (e: any) {
+      setStatus('ready')
+      setErrors((p) => (p + '\nBuild failed: ' + (e?.message ?? e)).slice(-3000))
+    }
+  }
+
   async function newProject() {
     const p = await createProject(uniqueDefaultName(projects), { ...STARTER_FILES })
     localStorage.setItem(LAST_KEY, p.id)
@@ -669,8 +685,11 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
         <button onClick={onEditProvider} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="Change provider / model">
           <Sparkles className="size-3.5 text-signal" /> <span className="font-mono text-[11px] text-muted-foreground">{model || 'provider'}</span>
         </button>
-        <button onClick={() => project && downloadZip(project.name, files, assetsRef.current)} className="flex items-center gap-1 rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground" title="Download project as ZIP">
+        <button onClick={() => project && downloadZip(project.name, files, assetsRef.current)} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="Download project as ZIP">
           <Download className="size-3.5" /> ZIP
+        </button>
+        <button onClick={deploy} disabled={running || status !== 'ready'} className="flex items-center gap-1 rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground disabled:opacity-50" title="Build and deploy to Puter">
+          <Rocket className="size-3.5" /> Deploy
         </button>
       </header>
 

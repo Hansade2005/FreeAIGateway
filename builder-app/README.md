@@ -25,6 +25,12 @@ Optional (Advanced):
 
 ## What the agent can do
 
+**Publish:** export the project as a **ZIP**, or **deploy to Puter** (one-click,
+free `*.puter.site` subdomain) — the Deploy button builds the app and opens a
+non-isolated `/deploy` page where Puter's popup sign-in works.
+
+## What the agent can do
+
 Read/write/edit files · run shell commands · generate images (if configured) ·
 read console logs · **screenshot** and **inspect** the live preview · a
 **Playwright-style accessibility snapshot** with refs, then **click / fill /
