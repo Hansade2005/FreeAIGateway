@@ -623,7 +623,9 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
       const { files: dist } = await ws.current!.build(fw.buildDirs.length ? fw.buildDirs : undefined)
       const id = await saveDeploy(project.name, dist)
       setStatus('ready')
-      window.open(`/deploy?id=${id}`, '_blank', 'noopener')
+      // Open the real file (works on static hosts like Puter that don't rewrite
+      // /deploy → /deploy.html; the dev/express servers serve it either way).
+      window.open(`/deploy.html?id=${id}`, '_blank', 'noopener')
     } catch (e: any) {
       setStatus('ready')
       setErrors((p) => (p + '\nBuild failed: ' + (e?.message ?? e)).slice(-3000))
