@@ -8,6 +8,20 @@
          no server config required. Harmless when the host already sends the headers. -->
     <script>window.coi = { coepCredentialless: () => true }</script>
     <script src="/coi-serviceworker.js"></script>
+    <script>
+      // The COI service worker activates but may not control THIS first
+      // navigation (its built-in self-reload can race and miss). So reload once
+      // through the now-active SW — its injected COOP/COEP headers then apply and
+      // the page becomes cross-origin isolated. Guarded against loops.
+      if (!self.crossOriginIsolated && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(function () {
+          if (!self.crossOriginIsolated && !navigator.serviceWorker.controller && !sessionStorage.getItem('coi-reloaded')) {
+            sessionStorage.setItem('coi-reloaded', '1')
+            location.reload()
+          }
+        })
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

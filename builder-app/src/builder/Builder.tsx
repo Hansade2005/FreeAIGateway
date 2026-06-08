@@ -214,7 +214,7 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
     resolveBuilderModel().then(setModel)
 
     ;(async () => {
-      if (!self.crossOriginIsolated) { setFatal('This page is not cross-origin isolated, so the in-browser runtime can’t start. Open /builder directly (it sets the required headers).'); return }
+      if (!self.crossOriginIsolated) { setFatal('Starting the in-browser runtime… If this persists, refresh the page — the service worker that enables it needs one reload (and a Chromium-based browser).'); return }
       const all = await listProjects()
       setProjects(all)
       const lastId = localStorage.getItem(LAST_KEY)
