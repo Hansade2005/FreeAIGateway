@@ -355,9 +355,12 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
       frameworkHint: getFramework(project.framework).hint,
       exec: {
         writeFile: async (path, c) => {
-          filesRef.current = { ...filesRef.current, [path]: c }
+          // Self-heal: if the agent rewrites an .html entry and drops the preview
+          // bridge, re-inject it so inspect/click/fill/evaluate/console keep working.
+          const c2 = /\.html$/i.test(path) ? ensureBridge(c) : c
+          filesRef.current = { ...filesRef.current, [path]: c2 }
           setFiles(filesRef.current)
-          await ws.current?.writeFile(path, c)
+          await ws.current?.writeFile(path, c2)
           clearConsole()
         },
         editFile: async (path, find, replace, replaceAll) => {
@@ -365,7 +368,8 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
           if (cur == null) return { ok: false, count: 0, message: `not found: ${path}` }
           if (!cur.includes(find)) return { ok: false, count: 0, message: `text not found in ${path}` }
           const count = replaceAll ? cur.split(find).length - 1 : 1
-          const next = replaceAll ? cur.split(find).join(replace) : cur.replace(find, replace)
+          let next = replaceAll ? cur.split(find).join(replace) : cur.replace(find, replace)
+          if (/\.html$/i.test(path)) next = ensureBridge(next) // re-inject the bridge if an edit removed it
           filesRef.current = { ...filesRef.current, [path]: next }
           setFiles(filesRef.current)
           await ws.current?.writeFile(path, next)
