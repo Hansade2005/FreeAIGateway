@@ -6,7 +6,7 @@ import { css } from '@codemirror/lang-css'
 import { html } from '@codemirror/lang-html'
 import { json } from '@codemirror/lang-json'
 import { EditorView } from '@codemirror/view'
-import { Pencil, Copy, ClipboardCopy, Trash2, Save, TerminalSquare, ChevronDown, X } from 'lucide-react'
+import { Pencil, Copy, ClipboardCopy, Trash2, Save, TerminalSquare, ChevronDown, X, FileCode2 } from 'lucide-react'
 import { FileTree, type FsOps } from './FileTree'
 import { ColResizer, RowResizer } from './Resizer'
 import { ContextMenu, type MenuState } from './ContextMenu'
@@ -80,6 +80,22 @@ export function CodeView({
   })
   useEffect(() => { localStorage.setItem(EXPLORER_KEY, String(explorerWidth)) }, [explorerWidth])
 
+  // VSCode-style open-file tabs. Any file that becomes `selected` (clicked in the
+  // tree, opened from a chat pill, or just written by the agent) joins the strip.
+  const [openTabs, setOpenTabs] = useState<string[]>(selected ? [selected] : [])
+  useEffect(() => {
+    if (selected && !openTabs.includes(selected)) setOpenTabs((t) => [...t, selected])
+  }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
+  const closeTab = (p: string) => {
+    setOpenTabs((tabs) => {
+      const idx = tabs.indexOf(p)
+      const next = tabs.filter((t) => t !== p)
+      if (p === selected) onSelect(next[idx] ?? next[idx - 1] ?? next[next.length - 1] ?? '')
+      return next
+    })
+  }
+  const baseName = (p: string) => p.split('/').pop() || p
+
   // Object URL for previewing a selected binary asset.
   const assetUrl = useMemo(() => {
     if (!isImage(selected) || !assets[selected]) return ''
@@ -97,9 +113,32 @@ export function CodeView({
         </div>
         <ColResizer onDelta={(dx) => setExplorerWidth((w) => Math.min(480, Math.max(140, w + dx)))} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between border-b px-3 py-1.5">
-            <span className="truncate font-mono text-[11px] text-muted-foreground">{selected}</span>
-            {dirty && <button onClick={onSave} className="rounded bg-signal px-2 py-0.5 text-[11px] font-semibold text-signal-foreground">Save</button>}
+          <div className="flex items-stretch border-b bg-surface-1">
+            <div className="flex min-w-0 flex-1 overflow-x-auto">
+              {openTabs.map((p) => {
+                const active = p === selected
+                return (
+                  <div
+                    key={p}
+                    onClick={() => onSelect(p)}
+                    title={p}
+                    className={`group flex shrink-0 cursor-pointer items-center gap-1.5 border-r px-3 py-1.5 text-[11px] ${active ? 'bg-background text-foreground' : 'text-muted-foreground hover:bg-surface-2'}`}
+                  >
+                    <FileCode2 className={`size-3 shrink-0 ${active ? 'text-signal' : ''}`} />
+                    <span className="max-w-[140px] truncate font-mono">{baseName(p)}</span>
+                    {active && dirty && <span className="size-1.5 shrink-0 rounded-full bg-signal" title="unsaved changes" />}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); closeTab(p) }}
+                      className="rounded p-0.5 opacity-0 transition hover:bg-surface-3 group-hover:opacity-100"
+                      title="Close"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+            {dirty && <button onClick={onSave} className="mr-2 shrink-0 self-center rounded bg-signal px-2 py-0.5 text-[11px] font-semibold text-signal-foreground">Save</button>}
           </div>
           <div className="min-h-0 flex-1 overflow-auto" onContextMenu={openEditorMenu}>
             {isImage(selected) ? (
