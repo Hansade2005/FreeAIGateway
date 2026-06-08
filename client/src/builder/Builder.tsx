@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
 import { Markdown } from './Markdown'
@@ -12,8 +12,8 @@ import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
-  type Project, type Message, type StoredAction, type MessagePart, type ProjectSettings,
-  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter, renameProject, deleteProject, saveProjectSettings,
+  type Project, type Message, type StoredAction, type MessagePart, type ProjectSettings, type Checkpoint,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessages, renameProject, deleteProject, saveProjectSettings, saveLeaf, setMessageParent,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -59,10 +59,50 @@ function timeAgo(t: number): string {
   const d = Math.floor(h / 24); return `${d}d ago`
 }
 
+// ── Conversation tree helpers ────────────────────────────────────────────────
+// Messages form a tree via parentId; the "active path" is the chain from a root
+// down to the current leaf. Editing a user message adds a sibling = a new branch.
+const byId = (all: Message[]) => { const m = new Map<number, Message>(); for (const x of all) if (x.id != null) m.set(x.id, x); return m }
+const newestId = (all: Message[]): number | null => { let best: Message | null = null; for (const x of all) if (x.id != null && (!best || x.createdAt > best.createdAt)) best = x; return best?.id ?? null }
+const childrenOf = (all: Message[], id: number | null) => all.filter((x) => (x.parentId ?? null) === id).sort((a, b) => a.createdAt - b.createdAt)
+const siblingsOf = (all: Message[], m: Message) => childrenOf(all, m.parentId ?? null).filter((x) => x.role === m.role)
+
+function pathTo(all: Message[], leaf: number | null): Message[] {
+  if (!all.length) return []
+  const map = byId(all)
+  let id: number | null = leaf != null && map.has(leaf) ? leaf : newestId(all)
+  const path: Message[] = []; const seen = new Set<number>()
+  while (id != null && map.has(id) && !seen.has(id)) { seen.add(id); const m = map.get(id)!; path.push(m); id = m.parentId ?? null }
+  return path.reverse()
+}
+function deepestLeaf(all: Message[], id: number): number {
+  let cur = id
+  for (;;) { const kids = childrenOf(all, cur); if (!kids.length) return cur; cur = kids[kids.length - 1].id! }
+}
+function subtreeIds(all: Message[], id: number): number[] {
+  const out: number[] = []; const stack = [id]
+  while (stack.length) { const cur = stack.pop()!; out.push(cur); for (const k of childrenOf(all, cur)) if (k.id != null) stack.push(k.id) }
+  return out
+}
+// Back-fill parentId on legacy linear chats (pre-branching) so they join the tree.
+async function ensureParentLinks(all: Message[]): Promise<Message[]> {
+  const sorted = [...all].sort((a, b) => a.createdAt - b.createdAt)
+  let prev: number | null = null
+  for (const m of sorted) {
+    if (m.parentId === undefined) { m.parentId = prev; if (m.id != null) await setMessageParent(m.id, prev) }
+    prev = m.id ?? prev
+  }
+  return sorted
+}
+
 export function Builder() {
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
-  const [messages, setMessages] = useState<Message[]>([])
+  const [messages, setMessages] = useState<Message[]>([]) // active branch path (rendered)
+  const [allMessages, setAllMessages] = useState<Message[]>([]) // full conversation tree
+  const [leafId, setLeafId] = useState<number | null>(null) // active branch tip
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editText, setEditText] = useState('')
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [status, setStatus] = useState<WCStatus>('idle')
@@ -157,7 +197,11 @@ export function Builder() {
       filesRef.current = proj.files
       assetsRef.current = proj.assets ?? {}
       setFiles(proj.files)
-      setMessages(await getMessages(proj.id))
+      const msgs = await ensureParentLinks(await getMessages(proj.id))
+      const leaf = proj.leafId ?? newestId(msgs)
+      setAllMessages(msgs)
+      setLeafId(leaf)
+      setMessages(pathTo(msgs, leaf))
       await boot(proj.files, assetsRef.current)
     })().catch((e) => setFatal(e?.message ?? String(e)))
 
@@ -197,24 +241,37 @@ export function Builder() {
     const prompt = text.trim()
     if (!prompt || running || !project || status !== 'ready') return
     setInput('')
+    // Snapshot the project as it is now (before the agent runs) so this user
+    // message becomes a restorable checkpoint. New prompts extend the active leaf.
+    const checkpoint = { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
+    await runTurn(prompt, leafId, checkpoint)
+  }
+
+  // Run one user→assistant turn under `parentId`, creating a new branch when
+  // parentId points at an existing user message's parent (i.e. an edit/resend).
+  async function runTurn(prompt: string, parentId: number | null, checkpoint: Checkpoint) {
+    if (!project) return
     setRunning(true)
     setWriting('')
-    // Snapshot the project as it is now (before the agent runs) so this user
-    // message becomes a restorable checkpoint.
-    const checkpoint = { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
-    const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, checkpoint, createdAt: Date.now() }
-    setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], parts: [], createdAt: Date.now() }])
-    await addMessage({ projectId: project.id, role: 'user', content: prompt, checkpoint })
+
+    const firstEver = allMessages.every((m) => m.role !== 'user')
+    const priorPath = parentId == null ? [] : pathTo(allMessages, parentId)
+    const userId = await addMessage({ projectId: project.id, role: 'user', content: prompt, checkpoint, parentId })
+    const userMsg: Message = { id: userId, projectId: project.id, role: 'user', content: prompt, checkpoint, parentId, createdAt: Date.now() }
+    const nextAll = [...allMessages, userMsg]
+    setAllMessages(nextAll)
+    setLeafId(userId); await saveLeaf(project.id, userId)
+    setMessages([...priorPath, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], parts: [], parentId: userId, createdAt: Date.now() }])
 
     // Auto-name the app from its first prompt (unless the user named it already).
-    if (messages.every((m) => m.role !== 'user') && isDefaultName(project.name)) {
+    if (firstEver && isDefaultName(project.name)) {
       const name = titleFromPrompt(prompt)
       await renameProject(project.id, name)
       setProject((p) => (p ? { ...p, name } : p))
       setProjects((ps) => ps.map((p) => (p.id === project.id ? { ...p, name } : p)))
     }
 
-    const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
+    const history = priorPath.slice(-8).map((m) => ({ role: m.role, content: m.content }))
     const recentErrors = errors
     setErrors('')
     let content = ''
@@ -306,11 +363,16 @@ export function Builder() {
       },
       complete: async () => {
         setWriting('')
-        if (content.trim() || acts.length) await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts, parts })
+        let asstId: number | undefined
+        if (content.trim() || acts.length) asstId = await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts, parts, parentId: userId })
         await saveFiles(project.id, filesRef.current)
         // Reload from DB so messages carry their ids + checkpoints (enables the
-        // copy / delete / restore actions).
-        setMessages(await getMessages(project.id))
+        // copy / delete / restore / branch actions).
+        const all = await getMessages(project.id)
+        const leaf = asstId ?? userId
+        setAllMessages(all)
+        setLeafId(leaf); await saveLeaf(project.id, leaf)
+        setMessages(pathTo(all, leaf))
         setRunning(false)
       },
     })
@@ -407,19 +469,21 @@ export function Builder() {
     setCopiedIdx(i); setTimeout(() => setCopiedIdx((c) => (c === i ? null : c)), 1400)
   }
 
-  async function deleteMsg(m: Message, i: number) {
-    if (m.id != null) await deleteMessage(m.id)
-    setMessages((ms) => ms.filter((_, idx) => idx !== i))
+  // Delete a message and its whole subtree (all branches below it).
+  async function deleteMsg(m: Message) {
+    if (m.id == null || !project) return
+    const ids = subtreeIds(allMessages, m.id)
+    await deleteMessages(ids)
+    const remaining = allMessages.filter((x) => x.id == null || !ids.includes(x.id))
+    const leaf = m.parentId != null && remaining.some((x) => x.id === m.parentId) ? m.parentId : newestId(remaining)
+    setAllMessages(remaining)
+    setLeafId(leaf); await saveLeaf(project.id, leaf)
+    setMessages(pathTo(remaining, leaf))
   }
 
-  // Roll the codebase back to a user message's checkpoint and drop everything
-  // after it (in the sandbox, the UI, and the DB).
-  async function restoreCheckpoint(m: Message, i: number) {
-    if (!project || !m.checkpoint || running) return
-    if (!confirm('Restore the code to this point? Changes and messages after it will be discarded.')) return
-    const cp = m.checkpoint
+  // Restore the running sandbox + persisted files to a checkpoint.
+  async function applyCheckpoint(cp: Checkpoint) {
     const keep = new Set([...Object.keys(cp.files), ...Object.keys(cp.assets ?? {})])
-    // remove files/assets added since the checkpoint
     for (const p of [...Object.keys(filesRef.current), ...Object.keys(assetsRef.current)]) {
       if (!keep.has(p)) await ws.current?.deleteFile(p).catch(() => {})
     }
@@ -428,11 +492,43 @@ export function Builder() {
     setFiles(filesRef.current)
     for (const [p, c] of Object.entries(cp.files)) await ws.current?.writeFile(p, c).catch(() => {})
     for (const [p, b] of Object.entries(cp.assets ?? {})) await ws.current?.writeBinary(p, b).catch(() => {})
-    await saveFiles(project.id, filesRef.current)
-    await saveAssets(project.id, assetsRef.current)
-    await deleteMessagesAfter(project.id, m.createdAt)
-    setMessages((ms) => ms.slice(0, i + 1))
+    if (project) { await saveFiles(project.id, filesRef.current); await saveAssets(project.id, assetsRef.current) }
+  }
+
+  // Roll the codebase back to a user message's checkpoint; the conversation
+  // view ends at that message (continuing from here naturally branches).
+  async function restoreCheckpoint(m: Message) {
+    if (!project || !m.checkpoint || running || m.id == null) return
+    if (!confirm('Restore the code to this point? The conversation will continue from here.')) return
+    await applyCheckpoint(m.checkpoint)
+    setLeafId(m.id); await saveLeaf(project.id, m.id)
+    setMessages(pathTo(allMessages, m.id))
     setErrors('')
+  }
+
+  // Edit a user message → re-run it as a NEW branch (sibling), from the same
+  // starting code state the original ran from.
+  function startEdit(m: Message) { if (m.id != null) { setEditingId(m.id); setEditText(m.content) } }
+  function cancelEdit() { setEditingId(null); setEditText('') }
+  async function saveEdit(m: Message) {
+    const text = editText.trim()
+    setEditingId(null)
+    if (!text || !project || running || status !== 'ready' || text === m.content) return
+    if (m.checkpoint) await applyCheckpoint(m.checkpoint)
+    const checkpoint = m.checkpoint ?? { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
+    await runTurn(text, m.parentId ?? null, checkpoint)
+  }
+
+  // Switch to the previous/next sibling branch of a user message.
+  async function switchBranch(m: Message, dir: -1 | 1) {
+    if (!project || running) return
+    const sibs = siblingsOf(allMessages, m)
+    const idx = sibs.findIndex((s) => s.id === m.id)
+    const target = sibs[idx + dir]
+    if (!target?.id) return
+    const leaf = deepestLeaf(allMessages, target.id)
+    setLeafId(leaf); await saveLeaf(project.id, leaf)
+    setMessages(pathTo(allMessages, leaf))
   }
 
   // Manual edit of the selected file → write to the running sandbox + persist.
@@ -560,10 +656,37 @@ export function Builder() {
                 const showWriting = m.role === 'assistant' && running && isLast && !!writing
                 const showActionRow = !running || !isLast
                 const openInCode = (p: string) => { setSelected(p); setTab('code') }
+                const editing = isUser && editingId != null && editingId === m.id
+                const sibs = isUser ? siblingsOf(allMessages, m) : []
+                const sibIdx = sibs.findIndex((s) => s.id === m.id)
                 return (
                   <div key={m.id ?? i} className={`group relative rounded-xl px-3 py-2 text-sm ${isUser ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
-                    <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
-                    {isUser ? (
+                    <div className="mb-0.5 flex items-center gap-1.5">
+                      <span className="font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</span>
+                      {isUser && sibs.length > 1 && !editing && (
+                        <span className="ml-auto flex items-center gap-0.5 font-mono text-[10px] text-muted-foreground">
+                          <button disabled={running || sibIdx <= 0} onClick={() => switchBranch(m, -1)} className="rounded p-0.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-30" title="Previous branch"><ChevronLeft className="size-3" /></button>
+                          {sibIdx + 1}/{sibs.length}
+                          <button disabled={running || sibIdx >= sibs.length - 1} onClick={() => switchBranch(m, 1)} className="rounded p-0.5 hover:bg-surface-2 hover:text-foreground disabled:opacity-30" title="Next branch"><ChevronRight className="size-3" /></button>
+                        </span>
+                      )}
+                    </div>
+                    {editing ? (
+                      <div className="space-y-2">
+                        <textarea
+                          autoFocus
+                          value={editText}
+                          onChange={(e) => setEditText(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(m) } else if (e.key === 'Escape') cancelEdit() }}
+                          rows={3}
+                          className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/40"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <button onClick={cancelEdit} className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:bg-surface-2">Cancel</button>
+                          <button onClick={() => saveEdit(m)} className="rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground">Save & branch</button>
+                        </div>
+                      </div>
+                    ) : isUser ? (
                       <UserText text={m.content} />
                     ) : m.parts ? (
                       // Inline timeline: text and tool pills in the exact order they happened.
@@ -589,15 +712,18 @@ export function Builder() {
                         )}
                       </>
                     )}
-                    {showActionRow && (
+                    {showActionRow && !editing && (
                       <div className="mt-1.5 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                         <MsgIcon title={copiedIdx === i ? 'Copied' : 'Copy'} onClick={() => copyMessage(m.content, i)}>
                           {copiedIdx === i ? <Check className="size-3 text-signal" /> : <Copy className="size-3" />}
                         </MsgIcon>
-                        {isUser && m.checkpoint && (
-                          <MsgIcon title="Restore code to here" onClick={() => restoreCheckpoint(m, i)}><RotateCcw className="size-3" /></MsgIcon>
+                        {isUser && !running && (
+                          <MsgIcon title="Edit (creates a new branch)" onClick={() => startEdit(m)}><Pencil className="size-3" /></MsgIcon>
                         )}
-                        <MsgIcon title="Delete message" onClick={() => deleteMsg(m, i)}><Trash2 className="size-3" /></MsgIcon>
+                        {isUser && m.checkpoint && (
+                          <MsgIcon title="Restore code to here" onClick={() => restoreCheckpoint(m)}><RotateCcw className="size-3" /></MsgIcon>
+                        )}
+                        <MsgIcon title="Delete message" onClick={() => deleteMsg(m)}><Trash2 className="size-3" /></MsgIcon>
                       </div>
                     )}
                   </div>

@@ -27,6 +27,7 @@ export interface Project {
   files: Record<string, string>
   assets?: Record<string, Uint8Array> // generated binary assets (images)
   settings?: ProjectSettings
+  leafId?: number | null // active conversation branch tip (last message shown)
   createdAt: number
   updatedAt: number
 }
@@ -51,6 +52,9 @@ export interface Message {
   actions?: StoredAction[]
   parts?: MessagePart[]
   checkpoint?: Checkpoint
+  // Conversation tree: the message this one follows. null = a root message.
+  // Editing a user message creates a sibling (same parentId) → a new branch.
+  parentId?: number | null
   createdAt: number
 }
 
@@ -137,6 +141,20 @@ export async function getMessages(projectId: string): Promise<Message[]> {
 
 export async function deleteMessage(id: number): Promise<void> {
   await db.messages.delete(id)
+}
+
+export async function deleteMessages(ids: number[]): Promise<void> {
+  await db.messages.bulkDelete(ids)
+}
+
+// Persist the active conversation branch tip for a project.
+export async function saveLeaf(projectId: string, leafId: number | null): Promise<void> {
+  await db.projects.update(projectId, { leafId })
+}
+
+// Set a message's parent (used to back-fill links on legacy linear chats).
+export async function setMessageParent(id: number, parentId: number | null): Promise<void> {
+  await db.messages.update(id, { parentId })
 }
 
 // Delete every message in the project newer than `createdAt` (used by restore).
