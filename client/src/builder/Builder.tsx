@@ -868,6 +868,8 @@ export function Builder() {
                   onChangeDraft={setDraft}
                   onSave={saveDraft}
                   fs={fsOps}
+                  workspace={ws.current}
+                  status={status}
                 />
               )}
             </div>
