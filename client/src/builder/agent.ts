@@ -65,6 +65,13 @@ export interface AgentRun {
 const MAX_STEPS = 60
 const norm = (p: string) => p.trim().replace(/^\.?\//, '')
 
+// Kilo's free auto-router (kilo-auto/free) has NO image-capable endpoint, so an
+// image turn must go to a Kilo route that does. Verified working anonymously:
+// nemotron nano-omni sees the image and returns usable content.
+const BUILDER_VISION_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
+const convoHasImage = (msgs: ChatMsg[]) =>
+  msgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
+
 export function runAgent(run: AgentRun): Observable<AgentEvent> {
   return new Observable<AgentEvent>((sub) => {
     const ctrl = new AbortController()
@@ -82,8 +89,11 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
           sub.next({ type: 'status', status: step === 0 ? 'thinking' : 'working' })
 
           let lastWriting = ''
+          // Route image-bearing turns to a vision-capable Kilo route; plain turns
+          // stay on the primary model.
+          const turnModel = convoHasImage(convo) ? BUILDER_VISION_MODEL : run.model
           const { text, toolCalls, model } = await streamChat(convo, {
-            model: run.model,
+            model: turnModel,
             fallbackModel: run.fallbackModel,
             tools: BUILDER_TOOLS,
             signal: ctrl.signal,
