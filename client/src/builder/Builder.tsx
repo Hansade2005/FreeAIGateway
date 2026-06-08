@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
 import { runAgent } from './agent'
@@ -255,6 +255,21 @@ export function Builder() {
         getConsoleLogs: async () => consoleRef.current.slice(-100).join('\n') || '(no console output yet)',
         readDom: async () => { const r = await requestFromPreview('dom'); return r.html ?? `(could not read DOM: ${r.error ?? 'unknown'})` },
         screenshot: async () => { const r = await requestFromPreview('shot', 30000); return { dataUrl: r.dataUrl, error: r.error } },
+        webSearch: async (query) => {
+          try {
+            const res = await fetch('https://r.jina.ai/https://html.duckduckgo.com/html?q=' + encodeURIComponent(query), { headers: { Accept: 'text/plain' } })
+            if (!res.ok) return `search failed: HTTP ${res.status}`
+            return (await res.text()).trim() || '(no results)'
+          } catch (e: any) { return `search failed: ${e?.message ?? e}` }
+        },
+        webFetch: async (url) => {
+          try {
+            const u = /^https?:\/\//i.test(url) ? url : 'https://' + url
+            const res = await fetch('https://r.jina.ai/' + u, { headers: { Accept: 'text/plain' } })
+            if (!res.ok) return `fetch failed: HTTP ${res.status}`
+            return (await res.text()).trim() || '(empty)'
+          } catch (e: any) { return `fetch failed: ${e?.message ?? e}` }
+        },
       },
     }).subscribe({
       next: (ev) => {
@@ -727,6 +742,8 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
     : action.kind === 'image' ? ImageIcon
     : action.kind === 'delete' ? Trash2
     : action.kind === 'file' ? FileText
+    : action.kind === 'search' ? Search
+    : action.kind === 'fetch' ? Globe
     : FileSearch
 
   // File/image/delete → click to open in the Code tab.
