@@ -10,6 +10,7 @@ import { generateImageBytes } from './gateway'
 import { CodeView } from './CodeView'
 import { resolveBuilderModel } from './model'
 import { getProvider } from '../provider'
+import { takePending } from '../pending'
 import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
@@ -96,7 +97,7 @@ async function ensureParentLinks(all: Message[]): Promise<Message[]> {
   return sorted
 }
 
-export function Builder({ onEditProvider, onHome, initialPrompt }: { onEditProvider?: () => void; onHome?: () => void; initialPrompt?: string } = {}) {
+export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => void; onHome?: () => void } = {}) {
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [messages, setMessages] = useState<Message[]>([]) // active branch path (rendered)
@@ -168,15 +169,16 @@ export function Builder({ onEditProvider, onHome, initialPrompt }: { onEditProvi
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, running])
   useEffect(() => { localStorage.setItem(CHATW_KEY, String(chatWidth)) }, [chatWidth])
 
-  // Auto-run the prompt the user typed on the Home screen, once the sandbox is
-  // up and the (brand-new) project has no messages yet.
+  // Auto-run the prompt the user typed on the Home screen — handed off via the
+  // pending store (not the URL/props), so it survives a reload. Consumed once,
+  // when the sandbox is ready and the brand-new project has no messages yet.
   useEffect(() => {
-    if (autoSent.current || !initialPrompt) return
-    if (status === 'ready' && project && !running && messages.length === 0) {
-      autoSent.current = true
-      send(initialPrompt)
-    }
-  }, [status, project, running, messages.length, initialPrompt])
+    if (autoSent.current) return
+    if (status !== 'ready' || !project || running || messages.length !== 0) return
+    autoSent.current = true
+    const p = takePending(project.id)
+    if (p?.prompt) send(p.prompt)
+  }, [status, project, running, messages.length])
 
   // Preview→builder channel: errors, console output, and replies to our DOM /
   // screenshot requests. Its OWN effect (not behind the boot guard) so React

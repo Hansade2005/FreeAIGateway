@@ -3,6 +3,7 @@ import { Builder } from './builder/Builder'
 import { Settings } from './Settings'
 import { Home } from './Home'
 import { isConfigured } from './provider'
+import { setPending } from './pending'
 import { createProject } from './builder/db'
 import { STARTER_FILES } from './builder/template'
 
@@ -20,19 +21,20 @@ export function App() {
   const [editing, setEditing] = useState(false)
   const [view, setView] = useState<'home' | 'builder'>('home')
   const [projectId, setProjectId] = useState<string | null>(null)
-  const [initialPrompt, setInitialPrompt] = useState<string | undefined>()
 
   if (!configured) return <Settings onSaved={() => setConfigured(true)} />
 
-  const open = (id: string, prompt?: string) => {
+  const open = (id: string) => {
     localStorage.setItem(LAST_KEY, id)
-    setProjectId(id); setInitialPrompt(prompt); setView('builder')
+    setProjectId(id); setView('builder')
   }
   const startFromPrompt = async (prompt: string) => {
     const p = await createProject(deriveName(prompt), { ...STARTER_FILES })
-    open(p.id, prompt)
+    // Hand the prompt off via the pending store (reload-safe, no URL/props).
+    setPending(p.id, { prompt })
+    open(p.id)
   }
-  const goHome = () => { setView('home'); setInitialPrompt(undefined); setProjectId(null) }
+  const goHome = () => { setView('home'); setProjectId(null) }
 
   const settingsModal = editing && (
     // Provider/model changes take effect on reload (the agent reads the model at
@@ -50,7 +52,7 @@ export function App() {
   }
   return (
     <>
-      <Builder key={projectId ?? 'builder'} initialPrompt={initialPrompt} onHome={goHome} onEditProvider={() => setEditing(true)} />
+      <Builder key={projectId ?? 'builder'} onHome={goHome} onEditProvider={() => setEditing(true)} />
       {settingsModal}
     </>
   )
