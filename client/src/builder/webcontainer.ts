@@ -143,6 +143,13 @@ export class Workspace {
     return { output: cleanTerminalOutput(output).slice(-4000), exitCode }
   }
 
+  /** Spawn an interactive shell (jsh) sized to a terminal, for the xterm panel.
+   * Returns the raw process so the UI can wire output→xterm and xterm→input. */
+  async startShell(cols: number, rows: number): Promise<Awaited<ReturnType<WebContainer['spawn']>>> {
+    if (!this.wc) throw new Error('workspace not started')
+    return this.wc.spawn('jsh', [], { terminal: { cols, rows } })
+  }
+
   /** Re-install (used when package.json changed) then the dev server picks up deps. */
   async reinstall(): Promise<void> {
     await this.install()

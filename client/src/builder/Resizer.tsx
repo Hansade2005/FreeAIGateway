@@ -26,3 +26,30 @@ export function ColResizer({ onDelta }: { onDelta: (dx: number) => void }) {
     </div>
   )
 }
+
+// Horizontal drag handle for resizing vertically-stacked panels (e.g. terminal).
+export function RowResizer({ onDelta }: { onDelta: (dy: number) => void }) {
+  function down(e: React.MouseEvent) {
+    e.preventDefault()
+    const move = (ev: MouseEvent) => onDelta(ev.movementY)
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('mouseup', up)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('mouseup', up)
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+  }
+  return (
+    <div
+      onMouseDown={down}
+      className="group relative h-1 shrink-0 cursor-row-resize bg-border/60 transition-colors hover:bg-signal/50"
+      title="Drag to resize"
+    >
+      <span className="absolute inset-x-0 -top-1.5 -bottom-1.5" />
+    </div>
+  )
+}
