@@ -5,6 +5,7 @@ import { PACKAGE_LOCK } from './template-lock'
 // builder and answers DOM / screenshot requests over postMessage. Shipped in the
 // template's index.html AND injected into older projects that predate it.
 export const PREVIEW_BRIDGE = `<script>
+  /* fag-bridge:2 */
   (function () {
     function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
     function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
@@ -28,10 +29,14 @@ export const PREVIEW_BRIDGE = `<script>
       } else if (d.__fagReq === 'shot') {
         (async function () {
           try {
-            var mod = await import('https://esm.sh/html2canvas@1.4.1');
-            var h2c = mod.default || mod;
-            var canvas = await h2c(document.body, { logging: false, useCORS: true, scale: 0.6, backgroundColor: null });
-            post({ __fagRes: 'shot', id: d.id, dataUrl: canvas.toDataURL('image/jpeg', 0.7) });
+            // html-to-image renders via the browser's own engine (SVG
+            // foreignObject), so modern CSS color functions (oklch/oklab, used
+            // by Tailwind v4) work — html2canvas can't parse those.
+            var mod = await import('https://esm.sh/html-to-image@1.11.13');
+            function bg(el) { var c = getComputedStyle(el).backgroundColor; return (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') ? c : ''; }
+            var color = bg(document.body) || bg(document.documentElement) || '#ffffff';
+            var dataUrl = await mod.toJpeg(document.body, { quality: 0.7, pixelRatio: 0.6, backgroundColor: color, cacheBust: true });
+            post({ __fagRes: 'shot', id: d.id, dataUrl: dataUrl });
           } catch (err) { post({ __fagRes: 'shot', id: d.id, error: String((err && err.message) || err) }); }
         })();
       }
@@ -39,11 +44,22 @@ export const PREVIEW_BRIDGE = `<script>
   })();
 </script>`
 
-// Ensure the preview bridge is present in a project's index.html (older projects
-// created before the bridge existed don't have it → DOM/screenshot would hang).
+// Marker baked into the current bridge so we can tell whether a project already
+// has the latest version (and skip rewriting it).
+const BRIDGE_MARKER = 'fag-bridge:2'
+// Matches a previously-injected bridge script (any version) so it can be
+// stripped and replaced — attribute-less <script> blocks that reference our
+// postMessage protocol. The app's own `<script type="module">` is untouched.
+const OLD_BRIDGE_RE = /<script>[\s\S]*?__fag(?:Req|Preview)[\s\S]*?<\/script>\s*/g
+
+// Ensure the project's index.html carries the CURRENT preview bridge. Older
+// projects predate the bridge (DOM/screenshot would hang) or carry the v1
+// html2canvas bridge (screenshots fail on Tailwind v4's oklch colors) — both
+// are upgraded in place.
 export function ensureBridge(html: string): string {
-  if (!html || html.includes('__fagReq')) return html
-  return html.includes('</head>') ? html.replace('</head>', `  ${PREVIEW_BRIDGE}\n  </head>`) : PREVIEW_BRIDGE + html
+  if (!html || html.includes(BRIDGE_MARKER)) return html
+  const stripped = html.replace(OLD_BRIDGE_RE, '')
+  return stripped.includes('</head>') ? stripped.replace('</head>', `  ${PREVIEW_BRIDGE}\n  </head>`) : PREVIEW_BRIDGE + stripped
 }
 
 // The starter project the agent edits: Vite + React 18 + Tailwind v4. Kept
