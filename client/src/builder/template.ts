@@ -5,7 +5,7 @@ import { PACKAGE_LOCK } from './template-lock'
 // builder and answers DOM / screenshot requests over postMessage. Shipped in the
 // template's index.html AND injected into older projects that predate it.
 export const PREVIEW_BRIDGE = `<script>
-  /* fag-bridge:2 */
+  /* fag-bridge:3 */
   (function () {
     function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
     function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
@@ -21,6 +21,10 @@ export const PREVIEW_BRIDGE = `<script>
     });
     window.addEventListener('error', function (e) { send('error', e.message, e.error && e.error.stack); });
     window.addEventListener('unhandledrejection', function (e) { send('unhandledrejection', (e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack); });
+    // On every (re)load tell the parent to drop stale logs, so the console buffer
+    // reflects only the freshly-loaded page (no leftover pre-fix errors).
+    post({ __fagReset: true });
+    window.addEventListener('load', function () { post({ __fagReset: true }); });
     window.addEventListener('message', function (e) {
       var d = e.data || {};
       if (d.__fagReq === 'dom') {
@@ -46,7 +50,7 @@ export const PREVIEW_BRIDGE = `<script>
 
 // Marker baked into the current bridge so we can tell whether a project already
 // has the latest version (and skip rewriting it).
-const BRIDGE_MARKER = 'fag-bridge:2'
+const BRIDGE_MARKER = 'fag-bridge:3'
 // Matches a previously-injected bridge script (any version) so it can be
 // stripped and replaced — attribute-less <script> blocks that reference our
 // postMessage protocol. The app's own `<script type="module">` is untouched.

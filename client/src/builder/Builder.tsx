@@ -164,6 +164,10 @@ export function Builder() {
         setErrors((p) => (p + '\n' + line).slice(-3000))
       } else if (d.__fagConsole) {
         pushLog(`[${d.level}] ${d.text}`)
+      } else if (d.__fagReset) {
+        // Preview (re)loaded — drop stale logs so the buffer is fresh.
+        consoleRef.current = []
+        setErrors('')
       } else if (d.__fagRes && d.id) {
         const resolve = pendingReqs.current.get(d.id)
         if (resolve) { resolve(d); pendingReqs.current.delete(d.id) }
@@ -274,6 +278,10 @@ export function Builder() {
     const history = priorPath.slice(-8).map((m) => ({ role: m.role, content: m.content }))
     const recentErrors = errors
     setErrors('')
+    // A code change invalidates prior runtime logs/errors — drop them so a later
+    // get_console_logs reflects only output produced since this edit (Fast Refresh
+    // swaps don't fire a full reload, so the bridge's reset signal won't cover it).
+    const clearConsole = () => { consoleRef.current = []; setErrors('') }
     let content = ''
     const acts: StoredAction[] = []
     // Ordered timeline of text + actions so pills render inline where they happened.
@@ -296,6 +304,7 @@ export function Builder() {
           filesRef.current = { ...filesRef.current, [path]: c }
           setFiles(filesRef.current)
           await ws.current?.writeFile(path, c)
+          clearConsole()
         },
         editFile: async (path, find, replace, replaceAll) => {
           const cur = filesRef.current[path] ?? (await ws.current?.readFile(path)) ?? null
@@ -306,6 +315,7 @@ export function Builder() {
           filesRef.current = { ...filesRef.current, [path]: next }
           setFiles(filesRef.current)
           await ws.current?.writeFile(path, next)
+          clearConsole()
           return { ok: true, count }
         },
         readFile: async (path) => filesRef.current[path] ?? (await ws.current?.readFile(path)) ?? null,
@@ -313,6 +323,7 @@ export function Builder() {
         deleteFile: async (path) => {
           const f = { ...filesRef.current }; delete f[path]; filesRef.current = f; setFiles(f)
           await ws.current?.deleteFile(path)
+          clearConsole()
         },
         generateImage: async (p, path) => {
           const bytes = await generateImageBytes(p)
