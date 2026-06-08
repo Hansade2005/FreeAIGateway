@@ -61,6 +61,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV23KiloAuto(db);
   migrateModelsV24KiloFreeRefresh(db);
   migrateModelsV25KiloAutoBudget(db);
+  migrateModelsV26KiloVision(db);
   // After all model migrations: add/refresh paid-equivalent pricing
   // (drives the realistic "Est. savings" analytics stat).
   applyModelPricing(db);
@@ -1783,6 +1784,24 @@ function migrateModelsV24KiloFreeRefresh(db: Database.Database) {
  */
 function migrateModelsV25KiloAutoBudget(db: Database.Database) {
   db.prepare("UPDATE models SET monthly_token_budget = 'free · ~2B/mo' WHERE platform = 'kilo' AND model_id = 'kilo-auto/free'").run();
+}
+
+/**
+ * V26 (June 2026): mark Kilo's free auto-routers + multimodal route as
+ * vision-capable. They accept OpenAI-style image_url parts including base64
+ * data URLs — kilo-auto/free and openrouter/free route to a vision model when
+ * an image is present, and nemotron nano-omni is multimodal-in. Without this,
+ * the router excluded them from image requests (requireVision filter) and fell
+ * through to GitHub GPT-4.x / Llama-4 routes that reject the builder's base64
+ * screenshots — a 20-deep fallback storm. Runs AFTER V16 (which resets
+ * supports_vision every boot) so the flag sticks. Idempotent.
+ */
+function migrateModelsV26KiloVision(db: Database.Database) {
+  db.prepare(`
+    UPDATE models SET supports_vision = 1
+    WHERE platform = 'kilo'
+      AND model_id IN ('kilo-auto/free', 'openrouter/free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free')
+  `).run();
 }
 
 // Embeddings V1 (2026-06): per-family embedding catalog. A "family" is one
