@@ -5,6 +5,29 @@ import { toFileSystemTree } from './template'
 // install → dev server, plus incremental file writes (Vite HMR picks them up,
 // no restart) and dev-server output capture for the error-feedback loop.
 
+// Tools like npm print spinners and colors using ANSI escapes + carriage-return
+// overwrites. Raw, that's an unreadable mess of "\x1b[1G\x1b[0K-\|/" for the
+// agent and the chat pill. Strip the escapes and collapse each line's CR
+// overwrites to its final state, then drop spinner-only/blank lines.
+export function cleanTerminalOutput(raw: string): string {
+  let s = raw
+    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, '') // OSC (e.g. window title)
+    .replace(/\x1B\[[0-9]*G/g, '\r')                    // cursor-to-column → line reset
+    .replace(/\x1B\[[0-2]?K/g, '')                      // erase-in-line
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')          // remaining CSI (colors, cursor moves)
+    .replace(/\x1B[@-Z\\-_]/g, '')                      // lone escapes
+    .replace(/\r\n/g, '\n')
+  const lines = s.split('\n').map((line) => {
+    const segs = line.split('\r')
+    return segs[segs.length - 1].replace(/\s+$/, '')
+  })
+  return lines
+    .filter((l) => l.trim() !== '' && !/^[-\\|/]+$/.test(l.trim()))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 export type WCStatus = 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'error'
 
 export interface WCCallbacks {
@@ -117,7 +140,7 @@ export class Workspace {
     let output = ''
     proc.output.pipeTo(new WritableStream({ write: (d) => { output += d; this.cb.onOutput?.(d) } }))
     const exitCode = await proc.exit
-    return { output: output.slice(-4000), exitCode }
+    return { output: cleanTerminalOutput(output).slice(-4000), exitCode }
   }
 
   /** Re-install (used when package.json changed) then the dev server picks up deps. */
