@@ -195,18 +195,34 @@ fallbackRouter.get('/token-usage', (_req: Request, res: Response) => {
 
   const totalBudget = modelBudgets.reduce((s, m) => s + m.budget, 0);
 
-  // Tokens used this month
+  // Tokens used this billing window — since the later of the month start and the
+  // last manual usage reset (stored in settings as 'usage_reset_at').
+  const resetRow = db.prepare("SELECT value FROM settings WHERE key = 'usage_reset_at'").get() as { value: string } | undefined;
   const usage = db.prepare(`
     SELECT
       COALESCE(SUM(input_tokens + output_tokens), 0) as total_used
     FROM requests
-    WHERE created_at >= datetime('now', 'start of month')
+    WHERE created_at >= MAX(datetime('now', 'start of month'), COALESCE(?, datetime('now', 'start of month')))
       AND request_type = 'chat'
-  `).get() as { total_used: number };
+  `).get(resetRow?.value ?? null) as { total_used: number };
 
   res.json({
     totalBudget,
     totalUsed: usage.total_used,
+    resetAt: resetRow?.value ?? null,
     models: modelBudgets,
   });
+});
+
+// Manually reset the monthly token-usage counter. Non-destructive: it records a
+// reset timestamp so the budget bar counts only requests AFTER it — request
+// history/analytics are left intact.
+fallbackRouter.post('/reset-usage', (_req: Request, res: Response) => {
+  const db = getDb();
+  const now = (db.prepare("SELECT datetime('now') as t").get() as { t: string }).t;
+  db.prepare(`
+    INSERT INTO settings (key, value) VALUES ('usage_reset_at', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(now);
+  res.json({ success: true, resetAt: now });
 });

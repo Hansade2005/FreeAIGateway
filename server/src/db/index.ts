@@ -60,6 +60,7 @@ export function initDb(dbPath?: string): Database.Database {
   migrateModelsV22Tools(db);
   migrateModelsV23KiloAuto(db);
   migrateModelsV24KiloFreeRefresh(db);
+  migrateModelsV25KiloAutoBudget(db);
   // After all model migrations: add/refresh paid-equivalent pricing
   // (drives the realistic "Est. savings" analytics stat).
   applyModelPricing(db);
@@ -1771,6 +1772,17 @@ function migrateModelsV24KiloFreeRefresh(db: Database.Database) {
     backfillFallback(db);
   });
   apply();
+}
+
+/**
+ * V25 (June 2026): Kilo Auto is a free auto-router whose pooled monthly free
+ * allotment is ~2B tokens — far larger than the placeholder '200/hr per IP'
+ * label (which parsed to a meaningless 200-token budget and made the dashboard
+ * look exhausted). Reflect the real ceiling so the monthly-budget bar is
+ * accurate. Idempotent (plain UPDATE, runs every boot).
+ */
+function migrateModelsV25KiloAutoBudget(db: Database.Database) {
+  db.prepare("UPDATE models SET monthly_token_budget = 'free · ~2B/mo' WHERE platform = 'kilo' AND model_id = 'kilo-auto/free'").run();
 }
 
 // Embeddings V1 (2026-06): per-family embedding catalog. A "family" is one
