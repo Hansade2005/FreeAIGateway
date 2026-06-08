@@ -1,11 +1,16 @@
 import type { FileSystemTree } from '@webcontainer/api'
 import { PACKAGE_LOCK } from './template-lock'
+// Inlined into the bridge so screenshots work WITHOUT a network/CDN import —
+// the WebContainer preview is cross-origin isolated, which blocks cross-origin
+// module imports (COEP). The UMD build sets the `htmlToImage` global.
+import htmlToImageJs from 'html-to-image/dist/html-to-image.js?raw'
 
 // Bridge injected into the preview: forwards console output + errors to the
 // builder and answers DOM / screenshot requests over postMessage. Shipped in the
 // template's index.html AND injected into older projects that predate it.
 export const PREVIEW_BRIDGE = `<script>
-  /* fag-bridge:7 */
+  /* fag-bridge:8 */
+  ${htmlToImageJs}
   (function () {
     function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
     function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
@@ -185,22 +190,16 @@ export const PREVIEW_BRIDGE = `<script>
         post({ __fagRes: 'dom', id: d.id, html: html.length > 16000 ? html.slice(0, 16000) + '\\n<!-- …truncated… -->' : html });
       } else if (d.__fagReq === 'shot') {
         (async function () {
-          // html-to-image renders via the browser's own engine (SVG
-          // foreignObject), so modern CSS colors (oklch/oklab, Tailwind v4) work.
-          // Loaded from a CDN; try several so an isolated/blocked CDN doesn't kill
-          // the screenshot, and report real errors (not "[object Event]").
-          function errStr(e) { return (e && (e.message || e.type)) ? (e.message || ('load error: ' + e.type)) : String(e); }
+          // html-to-image (inlined above, no CDN) renders via SVG foreignObject,
+          // so modern CSS colors (oklch/oklab, Tailwind v4) work.
           function bg(el) { var c = getComputedStyle(el).backgroundColor; return (c && c !== 'transparent' && c !== 'rgba(0, 0, 0, 0)') ? c : ''; }
-          var urls = ['https://esm.sh/html-to-image@1.11.13', 'https://cdn.jsdelivr.net/npm/html-to-image@1.11.13/+esm', 'https://unpkg.com/html-to-image@1.11.13?module'];
-          var mod = null, lastErr = 'unknown';
-          for (var i = 0; i < urls.length; i++) { try { mod = await import(urls[i]); if (mod) break; } catch (e) { lastErr = errStr(e); } }
-          var toJpeg = mod && (mod.toJpeg || (mod.default && mod.default.toJpeg));
-          if (!toJpeg) { post({ __fagRes: 'shot', id: d.id, error: 'could not load screenshot library (' + lastErr + ')' }); return; }
+          var H = (typeof htmlToImage !== 'undefined' && htmlToImage) || window.htmlToImage;
+          if (!H || !H.toJpeg) { post({ __fagRes: 'shot', id: d.id, error: 'screenshot library unavailable' }); return; }
           try {
             var color = bg(document.body) || bg(document.documentElement) || '#ffffff';
-            var dataUrl = await toJpeg(document.body, { quality: 0.7, pixelRatio: 0.6, backgroundColor: color, cacheBust: true });
+            var dataUrl = await H.toJpeg(document.body, { quality: 0.7, pixelRatio: 0.6, backgroundColor: color, cacheBust: true });
             post({ __fagRes: 'shot', id: d.id, dataUrl: dataUrl });
-          } catch (err) { post({ __fagRes: 'shot', id: d.id, error: errStr(err) }); }
+          } catch (err) { post({ __fagRes: 'shot', id: d.id, error: (err && err.message) || String(err) }); }
         })();
       } else if (d.__fagReq === 'cmd') {
         Promise.resolve().then(function () {
@@ -224,7 +223,7 @@ export const BRIDGE_BODY = PREVIEW_BRIDGE.replace(/^<script>\s*/, '').replace(/\
 
 // Marker baked into the current bridge so we can tell whether a project already
 // has the latest version (and skip rewriting it).
-const BRIDGE_MARKER = 'fag-bridge:7'
+const BRIDGE_MARKER = 'fag-bridge:8'
 // Matches a previously-injected bridge script (any version) so it can be
 // stripped and replaced — attribute-less <script> blocks that reference our
 // postMessage protocol. The app's own `<script type="module">` is untouched.
