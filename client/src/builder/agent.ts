@@ -82,6 +82,18 @@ const BUILDER_VISION_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
 const convoHasImage = (msgs: ChatMsg[]) =>
   msgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
 
+// Format an interaction result (click/fill/press_key/scroll) into text the model
+// can act on: the confirmation + scroll position + the FRESH page snapshot (with
+// refs) so it sees the effect and can continue interacting by ref.
+function fmtState(r: { result?: any; error?: string }): string {
+  if (r.error) return `error: ${r.error}`
+  const o = r.result || {}
+  let s = `ok: ${o.ok ?? ''}`
+  if (o.scroll) s += `\nscroll: y=${o.scroll.y}/${o.scroll.height} viewport=${o.scroll.viewport}${o.scroll.atBottom ? ' [at bottom]' : ''}${o.scroll.atTop ? ' [at top]' : ''}`
+  if (o.snapshot) s += `\n\nPage now (target elements by these refs):\n${o.snapshot}`
+  return s
+}
+
 export function runAgent(run: AgentRun): Observable<AgentEvent> {
   return new Observable<AgentEvent>((sub) => {
     const ctrl = new AbortController()
@@ -262,23 +274,27 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
       }
       case 'click': {
         const r = await ex.preview('click', { ref: args.ref, selector: args.selector })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `click ${args.ref ?? args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
-        return { content: r.error ? `click failed: ${r.error}` : `ok: ${r.result}` }
+        const out = fmtState(r)
+        sub.next({ type: 'action', action: { kind: 'interact', label: `click ${args.ref ?? args.selector}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 6000) }
       }
       case 'fill': {
         const r = await ex.preview('fill', { ref: args.ref, selector: args.selector, value: args.value })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `fill ${args.ref ?? args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
-        return { content: r.error ? `fill failed: ${r.error}` : `ok: ${r.result}` }
+        const out = fmtState(r)
+        sub.next({ type: 'action', action: { kind: 'interact', label: `fill ${args.ref ?? args.selector}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 6000) }
       }
       case 'press_key': {
         const r = await ex.preview('pressKey', { key: args.key, ref: args.ref, selector: args.selector, modifiers: args.modifiers })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `key ${args.key}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
-        return { content: r.error ? `press_key failed: ${r.error}` : `ok: ${r.result}` }
+        const out = fmtState(r)
+        sub.next({ type: 'action', action: { kind: 'interact', label: `key ${args.key}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 6000) }
       }
       case 'scroll': {
         const r = await ex.preview('scroll', { to: args.to, ref: args.ref, selector: args.selector })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `scroll ${args.to}`, output: r.error ? `error: ${r.error}` : JSON.stringify(r.result) } })
-        return { content: r.error ? `scroll failed: ${r.error}` : `ok: ${JSON.stringify(r.result)}` }
+        const out = fmtState(r)
+        sub.next({ type: 'action', action: { kind: 'interact', label: `scroll ${args.to}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 6000) }
       }
       case 'evaluate': {
         const r = await ex.preview('evaluate', { code: String(args.code ?? '') })
