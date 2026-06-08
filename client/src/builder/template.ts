@@ -5,7 +5,7 @@ import { PACKAGE_LOCK } from './template-lock'
 // builder and answers DOM / screenshot requests over postMessage. Shipped in the
 // template's index.html AND injected into older projects that predate it.
 export const PREVIEW_BRIDGE = `<script>
-  /* fag-bridge:5 */
+  /* fag-bridge:6 */
   (function () {
     function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
     function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
@@ -109,34 +109,50 @@ export const PREVIEW_BRIDGE = `<script>
       var s = getComputedStyle(el); if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') return false;
       var r = el.getBoundingClientRect(); return r.width > 0 || r.height > 0;
     }
+    // Build the accessibility ref tree (also re-assigns the data-fag-ref handles).
+    function buildSnapshot() {
+      var old = document.querySelectorAll('[data-fag-ref]');
+      for (var k = 0; k < old.length; k++) old[k].removeAttribute('data-fag-ref');
+      var lines = []; var n = 0; var CAP = 200;
+      function walk(el, depth) {
+        if (lines.length >= CAP) return;
+        for (var i = 0; i < el.children.length; i++) {
+          var c = el.children[i]; var tag = c.tagName.toLowerCase();
+          if (tag === 'script' || tag === 'style' || tag === 'noscript') continue;
+          if (!isVisible(c)) continue;
+          var role = roleOf(c); var emit = role || isInteractive(c); var childDepth = depth;
+          if (emit) {
+            var name = accName(c).replace(/\\s+/g, ' ').trim(); if (name.length > 60) name = name.slice(0, 60) + '…';
+            var ref = 'e' + (++n); c.setAttribute('data-fag-ref', ref);
+            var pad = ''; for (var dd = 0; dd < depth; dd++) pad += '  ';
+            lines.push(pad + '- ' + (role || 'generic') + (name ? ' "' + name + '"' : '') + ' [ref=' + ref + ']');
+            childDepth = depth + 1;
+          }
+          walk(c, childDepth);
+        }
+      }
+      walk(document.body, 0);
+      return lines.join('\\n') || '(no interactive elements found)';
+    }
+    function pageScroll() {
+      var se = document.scrollingElement || document.documentElement;
+      return { y: se.scrollTop, height: se.scrollHeight, viewport: se.clientHeight,
+        atBottom: Math.ceil(se.scrollTop + se.clientHeight) >= se.scrollHeight, atTop: se.scrollTop <= 0 };
+    }
+    // Let the app re-render / navigate after an action, then report the new state
+    // (fresh snapshot + scroll position) so the agent can continue by ref.
+    function stateAfter(label) {
+      return new Promise(function (res) {
+        requestAnimationFrame(function () { setTimeout(function () {
+          res({ ok: label, url: location.href, title: document.title, scroll: pageScroll(), snapshot: buildSnapshot() });
+        }, 150); });
+      });
+    }
 
     var COMMANDS = {
       // Playwright-style accessibility snapshot: a YAML-ish tree of roles + names
       // with stable [ref=eN] handles the agent then passes to click/fill/etc.
-      snapshot: function () {
-        var old = document.querySelectorAll('[data-fag-ref]');
-        for (var k = 0; k < old.length; k++) old[k].removeAttribute('data-fag-ref');
-        var lines = []; var n = 0; var CAP = 200;
-        function walk(el, depth) {
-          if (lines.length >= CAP) return;
-          for (var i = 0; i < el.children.length; i++) {
-            var c = el.children[i]; var tag = c.tagName.toLowerCase();
-            if (tag === 'script' || tag === 'style' || tag === 'noscript') continue;
-            if (!isVisible(c)) continue;
-            var role = roleOf(c); var emit = role || isInteractive(c); var childDepth = depth;
-            if (emit) {
-              var name = accName(c).replace(/\\s+/g, ' ').trim(); if (name.length > 60) name = name.slice(0, 60) + '…';
-              var ref = 'e' + (++n); c.setAttribute('data-fag-ref', ref);
-              var pad = ''; for (var dd = 0; dd < depth; dd++) pad += '  ';
-              lines.push(pad + '- ' + (role || 'generic') + (name ? ' "' + name + '"' : '') + ' [ref=' + ref + ']');
-              childDepth = depth + 1;
-            }
-            walk(c, childDepth);
-          }
-        }
-        walk(document.body, 0);
-        return lines.join('\\n') || '(no interactive elements found)';
-      },
+      snapshot: function () { return buildSnapshot(); },
       inspect: function (a) {
         if (!a.selector && !a.ref) return { url: location.href, title: document.title, text: clamp(document.body && document.body.innerText, 4000) };
         var el = target(a); var cs = getComputedStyle(el); var r = el.getBoundingClientRect();
@@ -145,15 +161,17 @@ export const PREVIEW_BRIDGE = `<script>
         var attrs = {}; for (var i = 0; i < el.attributes.length; i++) attrs[el.attributes[i].name] = el.attributes[i].value;
         return { tag: el.tagName.toLowerCase(), text: clamp(el.innerText, 500), rect: { x: r.x, y: r.y, w: r.width, h: r.height }, styles: styles, attributes: attrs };
       },
-      click: function (a) { realClick(target(a), a.button || 0); return 'clicked ' + (a.ref || a.selector); },
-      fill: function (a) { setNativeValue(target(a), a.value == null ? '' : String(a.value)); return 'filled ' + (a.ref || a.selector); },
-      pressKey: function (a) { pressKeyOn((a.ref || a.selector) ? target(a) : null, a.key, a.modifiers); return 'pressed ' + a.key; },
+      // Interactions return the RESULTING page state (fresh snapshot + scroll), so
+      // the agent immediately sees the effect and continues by ref.
+      click: function (a) { realClick(target(a), a.button || 0); return stateAfter('clicked ' + (a.ref || a.selector)); },
+      fill: function (a) { setNativeValue(target(a), a.value == null ? '' : String(a.value)); return stateAfter('filled ' + (a.ref || a.selector)); },
+      pressKey: function (a) { pressKeyOn((a.ref || a.selector) ? target(a) : null, a.key, a.modifiers); return stateAfter('pressed ' + a.key); },
       scroll: function (a) {
         var el = (a.ref || a.selector) ? target(a) : null; var to = a.to;
         if (to === 'bottom') { var h = el ? el.scrollHeight : document.body.scrollHeight; if (el) el.scrollTop = h; else window.scrollTo({ top: h }); }
         else if (to === 'top') { if (el) el.scrollTop = 0; else window.scrollTo({ top: 0 }); }
         else { var nn = Number(to) || 0; if (el) el.scrollTop = nn; else window.scrollTo({ top: nn }); }
-        return el ? { scrollTop: el.scrollTop } : { scrollY: window.scrollY };
+        return stateAfter('scrolled ' + to + (el ? ' (elementScrollTop=' + el.scrollTop + ')' : ''));
       },
       // Arbitrary JS escape hatch (submit forms, inject scripts, drive scrollbars,
       // anything). Result is JSON-sanitized for postMessage.
@@ -195,7 +213,7 @@ export const PREVIEW_BRIDGE = `<script>
 
 // Marker baked into the current bridge so we can tell whether a project already
 // has the latest version (and skip rewriting it).
-const BRIDGE_MARKER = 'fag-bridge:5'
+const BRIDGE_MARKER = 'fag-bridge:6'
 // Matches a previously-injected bridge script (any version) so it can be
 // stripped and replaced — attribute-less <script> blocks that reference our
 // postMessage protocol. The app's own `<script type="module">` is untouched.
