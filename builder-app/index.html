@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI App Builder</title>
+    <!-- Make the page cross-origin isolated (for WebContainer) on ANY static host,
+         no server config required. Harmless when the host already sends the headers. -->
+    <script>window.coi = { coepCredentialless: () => true }</script>
+    <script src="/coi-serviceworker.js"></script>
   </head>
   <body>
     <div id="root"></div>
