@@ -128,6 +128,9 @@ export function Builder() {
   const [files, setFiles] = useState<Record<string, string>>({})
   const [draft, setDraft] = useState<string | null>(null) // editable buffer for the selected file
   const sub = useRef<Subscription | null>(null)
+  // Finalizer for the in-flight turn: persists the partial assistant message so
+  // Stop (or normal completion) keeps whatever streamed so far. Idempotent.
+  const finalizeRef = useRef<null | (() => Promise<void>)>(null)
   const logRef = useRef('')
   const consoleRef = useRef<string[]>([])           // app console output + runtime errors
   const previewIframeRef = useRef<HTMLIFrameElement>(null)
@@ -292,6 +295,28 @@ export function Builder() {
       else parts.push({ type: 'text', text: t })
     }
 
+    // Persist whatever has streamed so far (called on normal completion AND on
+    // Stop). Idempotent via finalizeRef being cleared after the first run.
+    let finalized = false
+    const finalize = async () => {
+      if (finalized) return
+      finalized = true
+      finalizeRef.current = null
+      setWriting('')
+      let asstId: number | undefined
+      if (content.trim() || acts.length) asstId = await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts, parts, parentId: userId })
+      await saveFiles(project.id, filesRef.current)
+      // Reload from DB so messages carry their ids + checkpoints (enables the
+      // copy / delete / restore / branch actions).
+      const all = await getMessages(project.id)
+      const leaf = asstId ?? userId
+      setAllMessages(all)
+      setLeafId(leaf); await saveLeaf(project.id, leaf)
+      setMessages(pathTo(all, leaf))
+      setRunning(false)
+    }
+    finalizeRef.current = finalize
+
     sub.current = runAgent({
       history,
       files: filesRef.current,
@@ -372,24 +397,16 @@ export function Builder() {
           patchAssistant((m) => ({ ...m, content, parts: [...parts] }))
         }
       },
-      complete: async () => {
-        setWriting('')
-        let asstId: number | undefined
-        if (content.trim() || acts.length) asstId = await addMessage({ projectId: project.id, role: 'assistant', content, actions: acts, parts, parentId: userId })
-        await saveFiles(project.id, filesRef.current)
-        // Reload from DB so messages carry their ids + checkpoints (enables the
-        // copy / delete / restore / branch actions).
-        const all = await getMessages(project.id)
-        const leaf = asstId ?? userId
-        setAllMessages(all)
-        setLeafId(leaf); await saveLeaf(project.id, leaf)
-        setMessages(pathTo(all, leaf))
-        setRunning(false)
-      },
+      complete: () => { void finalize() },
     })
   }
 
-  function stop() { sub.current?.unsubscribe(); setRunning(false) }
+  // Stop mid-stream: tear down the agent run, but first persist whatever has
+  // already streamed (unsubscribe aborts the stream so `complete` never fires).
+  function stop() {
+    sub.current?.unsubscribe()
+    void finalizeRef.current?.()
+  }
 
   // File operations backing the explorer/editor context menus. Each mutates the
   // in-memory maps, the running sandbox, and the persisted project together.
