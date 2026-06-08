@@ -13,8 +13,18 @@ export interface ProviderConfig {
 
 const KEY = 'fag-builder-provider'
 
+// Built-in default: a free, keyless OpenAI-compatible Kilo proxy. The app works
+// out of the box with no setup; users can change it in Settings → Provider.
+export const DEFAULT_PROVIDER: ProviderConfig = {
+  baseUrl: 'https://the3rdacademy.com/api/v1',
+  apiKey: '',
+  model: 'kilo-auto/free',
+  visionModel: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+}
+
 export interface Preset { label: string; baseUrl: string; model: string; keyless?: boolean; note?: string }
 export const PRESETS: Preset[] = [
+  { label: 'Default (free, no key)', baseUrl: 'https://the3rdacademy.com/api/v1', model: 'kilo-auto/free', keyless: true, note: 'Free Kilo proxy — works out of the box, no key' },
   { label: 'Kilo (free, anonymous)', baseUrl: 'https://api.kilo.ai/api/gateway/v1', model: 'kilo-auto/free', keyless: true, note: 'No key — free auto-router, rate-limited per IP' },
   { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   { label: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openai/gpt-4o-mini' },
@@ -23,8 +33,11 @@ export const PRESETS: Preset[] = [
   { label: 'Custom', baseUrl: '', model: '' },
 ]
 
-export function getProvider(): ProviderConfig | null {
-  try { const r = localStorage.getItem(KEY); return r ? (JSON.parse(r) as ProviderConfig) : null } catch { return null }
+// Returns the user's saved provider, or the built-in default so the app is
+// usable immediately with no configuration.
+export function getProvider(): ProviderConfig {
+  try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r) as ProviderConfig } catch { /* ignore */ }
+  return DEFAULT_PROVIDER
 }
 export function setProvider(c: ProviderConfig): void {
   localStorage.setItem(KEY, JSON.stringify(c))
@@ -35,5 +48,5 @@ export function isConfigured(): boolean {
 }
 // Normalize the base URL (strip a trailing slash) for endpoint concatenation.
 export function apiBase(): string {
-  return (getProvider()?.baseUrl || '').replace(/\/+$/, '')
+  return (getProvider().baseUrl || '').replace(/\/+$/, '')
 }
