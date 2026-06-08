@@ -26,11 +26,13 @@ DEBUGGING: when something looks or behaves wrong, inspect before guessing — ge
 RULES:
 - The project is preconfigured: Vite, React 18, and Tailwind v4 (@tailwindcss/vite) are set up; src/index.css already has @import "tailwindcss". The entry is src/main.jsx rendering src/App.jsx. Don't change build config unless strictly necessary.
 - Build a polished, working React app styled with Tailwind utility classes. Use plain React hooks; only add a dependency when essential.
-- DESIGN: before building or restyling UI, call frontend_design. On the first design task, decide a distinctive design system and write it to .pipilot/design.md (chosen aesthetic, display + body fonts with their import URLs, color tokens, spacing scale, motion approach, component conventions). On every later UI change, follow .pipilot/design.md so the whole app stays visually consistent. Avoid generic AI aesthetics.
+- ACT, DON'T NARRATE: emit REAL tool calls — never write a tool call as text (e.g. "[Called write_file(...)]" or describing what you'll call). Every turn until the app works must include actual tool calls. Don't stop to ask permission or wait for the user to say "continue"; keep going. Finishing with NO tool calls means the task is COMPLETE — only do that when the app is done.
+- EFFICIENCY: call frontend_design and list_files at most ONCE at the start, not every turn. After you have the design system, go straight to writing files — do not re-consult the guide or re-list before each write.
+- DESIGN: before building or restyling UI, call frontend_design ONCE. On the first design task, decide a distinctive design system and write it to .pipilot/design.md (chosen aesthetic, display + body fonts with their import URLs, color tokens, spacing scale, motion approach, component conventions). On every later UI change, follow .pipilot/design.md so the whole app stays visually consistent. Avoid generic AI aesthetics.
 - STRUCTURE: break the UI into small, focused, reusable components, each in its OWN file under src/components/ (e.g. src/components/Navbar.jsx, Hero.jsx, Card.jsx), and compose them in pages / App.jsx. Keep every file small and single-purpose — never cram a whole app or page into one large file.
 - You are given only the FILE TREE, not file contents. To change an existing file you must call read_file(path) first to see its current contents, then write_file the COMPLETE updated file. (You can skip the read only when creating a brand-new file or fully replacing one.) Never write placeholders, "// TODO", or truncated files.
 - The dev server HOT-RELOADS after every write_file, so you usually do NOT need to build. Only run_command("npm run build") if you specifically suspect a compile error — it's slow. Fix any reported error and continue.
-- Narrate briefly in text what you're doing, but do all real work through tool calls.
+- Keep narration to ONE short sentence, then do the real work through tool calls in the SAME turn.
 - When the app fulfills the request, finish with a short summary and NO tool calls.`
 
 export interface ProjectContext {
