@@ -42,7 +42,7 @@ let bootPromise: Promise<WebContainer> | null = null
 // WebContainer allows only one instance per page.
 async function getContainer(): Promise<WebContainer> {
   if (instance) return instance
-  if (!bootPromise) bootPromise = WebContainer.boot()
+  if (!bootPromise) bootPromise = WebContainer.boot({ coep: 'credentialless' })
   instance = await bootPromise
   return instance
 }
