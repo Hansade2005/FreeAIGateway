@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search, MousePointerClick } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search, MousePointerClick, Brain } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
 import { Markdown } from './Markdown'
@@ -738,7 +738,7 @@ export function Builder() {
                       // Inline timeline: text and tool pills in the exact order they happened.
                       <div className="flex min-w-0 flex-col gap-1.5">
                         {m.parts.map((part, k) => part.type === 'text'
-                          ? (cleanText(part.text) ? <Markdown key={k}>{cleanText(part.text)}</Markdown> : null)
+                          ? <AssistantText key={k} text={part.text} />
                           : <ActionPill key={k} action={part.action} onOpen={openInCode} />)}
                         {showWriting && (
                           <span className="flex items-center gap-1.5 self-start rounded-md border border-signal/40 bg-signal-muted px-2 py-1 font-mono text-[11px] text-signal">
@@ -750,7 +750,7 @@ export function Builder() {
                     ) : (
                       // Legacy messages (pre-timeline): prose then grouped pills.
                       <>
-                        <Markdown>{cleanText(m.content)}</Markdown>
+                        <AssistantText text={m.content} />
                         {actions.length > 0 && (
                           <div className="mt-2 flex min-w-0 flex-col gap-1">
                             {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={openInCode} />)}
@@ -907,6 +907,63 @@ export function Builder() {
 // otherwise render as a big empty gap before the action pills).
 function cleanText(s: string): string {
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+// Split assistant text into normal prose and <think>…</think> reasoning blocks.
+// An unterminated <think> (still streaming) is returned with streaming:true.
+type Seg = { type: 'text' | 'think'; content: string; streaming?: boolean }
+function parseThink(text: string): Seg[] {
+  const segs: Seg[] = []
+  let rest = text
+  for (;;) {
+    const open = rest.indexOf('<think>')
+    if (open === -1) { if (rest) segs.push({ type: 'text', content: rest }); break }
+    const before = rest.slice(0, open)
+    if (before) segs.push({ type: 'text', content: before })
+    const after = rest.slice(open + 7)
+    const close = after.indexOf('</think>')
+    if (close === -1) { segs.push({ type: 'think', content: after, streaming: true }); break }
+    segs.push({ type: 'think', content: after.slice(0, close) })
+    rest = after.slice(close + 8)
+  }
+  return segs
+}
+
+// Collapsible reasoning accordion. Auto-expanded while the model is still
+// thinking (no closing tag yet), then collapses to a tidy "Reasoning" toggle.
+function Reasoning({ content, streaming }: { content: string; streaming?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const show = streaming || open
+  return (
+    <div className="self-start w-full min-w-0 overflow-hidden rounded-lg border bg-surface-1/60">
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
+        {streaming ? <Loader2 className="size-3.5 animate-spin" /> : <Brain className="size-3.5" />}
+        {streaming ? 'Thinking…' : 'Reasoning'}
+        <ChevronDown className={`ml-auto size-3 shrink-0 transition-transform ${show ? 'rotate-180' : ''}`} />
+      </button>
+      {show && (
+        <div className="max-h-60 overflow-auto border-t px-2.5 py-2 text-[12px] text-muted-foreground">
+          <Markdown>{cleanText(content)}</Markdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Render assistant text: <think> blocks become reasoning accordions, the rest
+// renders as markdown.
+function AssistantText({ text }: { text: string }) {
+  if (!text) return null
+  const segs = parseThink(text)
+  const out = segs.map((s, i) => {
+    if (s.type === 'think') {
+      const c = cleanText(s.content)
+      return c ? <Reasoning key={i} content={s.content} streaming={s.streaming} /> : null
+    }
+    const c = cleanText(s.content)
+    return c ? <Markdown key={i}>{c}</Markdown> : null
+  }).filter(Boolean)
+  return out.length ? <>{out}</> : null
 }
 
 const TRUNCATE_AT = 128
