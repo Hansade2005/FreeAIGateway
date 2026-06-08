@@ -523,9 +523,12 @@ export function Builder() {
   function cancelEdit() { setEditingId(null); setEditText('') }
   async function saveEdit(m: Message) {
     const text = editText.trim()
+    if (!text || !project) { setEditingId(null); return }
+    if (running || status !== 'ready') return // the Save button is disabled in this state
     setEditingId(null)
-    if (!text || !project || running || status !== 'ready' || text === m.content) return
-    if (m.checkpoint) await applyCheckpoint(m.checkpoint)
+    // Rebase the sandbox to the state this message originally ran from, then
+    // re-run as a new sibling branch. (Same text is allowed — it regenerates.)
+    if (m.checkpoint) { try { await applyCheckpoint(m.checkpoint) } catch { /* keep going */ } }
     const checkpoint = m.checkpoint ?? { files: { ...filesRef.current }, assets: { ...assetsRef.current } }
     await runTurn(text, m.parentId ?? null, checkpoint)
   }
@@ -693,8 +696,9 @@ export function Builder() {
                           className="w-full resize-none rounded-lg border bg-background px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/40"
                         />
                         <div className="flex items-center justify-end gap-2">
+                          {status !== 'ready' && <span className="mr-auto text-[11px] text-muted-foreground">sandbox starting…</span>}
                           <button onClick={cancelEdit} className="rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:bg-surface-2">Cancel</button>
-                          <button onClick={() => saveEdit(m)} className="rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground">Save & branch</button>
+                          <button onClick={() => saveEdit(m)} disabled={running || status !== 'ready' || !editText.trim()} className="rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground disabled:opacity-50">Save &amp; branch</button>
                         </div>
                       </div>
                     ) : isUser ? (
