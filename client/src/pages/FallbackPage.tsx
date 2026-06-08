@@ -193,6 +193,7 @@ function formatTokens(n: number): string {
 interface TokenUsageData {
   totalBudget: number
   totalUsed: number
+  resetAt?: string | null
   models: { displayName: string; platform: string; budget: number }[]
 }
 
@@ -238,6 +239,15 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
   const remaining = Math.max(0, totalBudget - totalUsed)
   const remainingPct = totalBudget > 0 ? Math.round((remaining / totalBudget) * 100) : 0
 
+  const queryClient = useQueryClient()
+  const resetMutation = useMutation({
+    mutationFn: () => apiFetch('/api/fallback/reset-usage', { method: 'POST' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['fallback', 'token-usage'] }),
+  })
+  const onReset = () => {
+    if (confirm('Reset the monthly token-usage counter to 0? Request history and analytics are kept.')) resetMutation.mutate()
+  }
+
   // Collapse the per-model legend to a few rows; the chevron reveals the rest.
   // The toggle only appears when the legend actually overflows the collapsed
   // height (column count — and so row count — depends on viewport width).
@@ -263,13 +273,23 @@ function TokenUsageBar({ data }: { data: TokenUsageData }) {
 
   return (
     <section className="rounded-3xl border bg-card p-5">
-      <div className="flex items-baseline justify-between mb-3">
+      <div className="flex items-baseline justify-between mb-3 gap-3">
         <h2 className="text-sm font-medium">Monthly token budget</h2>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          <span className="text-foreground font-medium">{formatTokens(remaining)}</span> remaining
-          <span className="mx-1.5">·</span>
-          {remainingPct}% of {formatTokens(totalBudget)}
-        </span>
+        <div className="flex items-baseline gap-3">
+          <span className="text-xs text-muted-foreground tabular-nums">
+            <span className="text-foreground font-medium">{formatTokens(remaining)}</span> remaining
+            <span className="mx-1.5">·</span>
+            {remainingPct}% of {formatTokens(totalBudget)}
+          </span>
+          <button
+            onClick={onReset}
+            disabled={resetMutation.isPending}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            title="Reset the monthly usage counter to 0 (keeps history)"
+          >
+            {resetMutation.isPending ? 'Resetting…' : 'Reset usage'}
+          </button>
+        </div>
       </div>
 
       <div className="flex h-2.5 rounded-full overflow-hidden bg-muted">
