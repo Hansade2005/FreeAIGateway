@@ -31,26 +31,35 @@ read console logs · **screenshot** and **inspect** the live preview · a
 press_key / scroll / evaluate** the running app (each interaction returns the
 fresh page state) · web search & fetch.
 
+## Runs entirely in the browser
+
+There is **no backend**. All logic is client-side: WebContainer (Node-in-WASM)
+builds and runs the generated app in your tab, the agent calls your configured
+API directly via `fetch`, and everything persists in IndexedDB.
+
+The one browser requirement is **cross-origin isolation** (COOP `same-origin` +
+COEP `credentialless`), which WebContainer needs. This build satisfies it three
+ways, so you can deploy with **zero server**:
+
+1. **Service-worker shim (default)** — `public/coi-serviceworker.js` injects the
+   headers client-side, so the built `dist/` works on **any** static host
+   (GitHub Pages, S3, etc.) with no header config at all.
+2. **Static-host header config** — `public/_headers` (Netlify / Cloudflare
+   Pages) and `vercel.json` (Vercel) set the headers natively.
+3. **`npm start`** — a tiny Express static server (`server.mjs`) that sets them,
+   for local/self-hosting.
+
 ## Run it
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173 (dev server sets the COOP/COEP headers)
+npm run dev          # http://localhost:5173
+npm run build        # → dist/  (static; deploy anywhere)
+npm start            # optional: serve dist/ locally with the headers
 ```
 
-Production:
-
-```bash
-npm run build
-npm start          # serves dist/ with the required cross-origin-isolation headers
-```
-
-## Requirements
-
-WebContainer needs a **cross-origin isolated** context (COOP `same-origin` +
-COEP `credentialless`) and a Chromium-based browser. The included dev server,
-`vite preview`, and `npm start` all set these headers. If you host the built
-`dist/` elsewhere, your host **must** send them too.
+Deploy `dist/` to any static host — the service-worker shim makes it
+cross-origin isolated on its own. Use a Chromium-based browser.
 
 ## Stack
 
