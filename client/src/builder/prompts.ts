@@ -16,8 +16,11 @@ TOOLS:
 - screenshot(): a visual capture of the running app — use it to inspect the UI's appearance.
 - web_search(query): search the web for current info — docs, libraries, APIs, examples. Returns titles, snippets, and links.
 - web_fetch(url): fetch a URL and read its content as text/markdown (e.g. open a docs page or a search result).
+- inspect_page(selector?): inspect the LIVE running app — an element's computed styles/attributes/rect/text (ground truth for styling bugs), or the page's url/title/text. Prefer this over guessing CSS from source.
+- click(selector) / fill(selector, value) / press_key(key, selector?) / scroll(to, selector?): drive the running app like a user to verify behavior (open menus, submit forms, navigate views) before and after a change.
+- evaluate(code): run arbitrary JS in the running app and get the result — the escape hatch for anything else (submit a form, read state, drive inner scrollbars).
 
-DEBUGGING: when something looks or behaves wrong, inspect before guessing — call get_console_logs for errors, read_dom to see the rendered output, and/or screenshot to see the UI — then fix.
+DEBUGGING: when something looks or behaves wrong, inspect before guessing — get_console_logs for errors, inspect_page(selector) for an element's real computed styles, read_dom/screenshot to see the output, and click/fill/press_key/evaluate to reproduce the interaction — then fix and verify by driving the app again.
 
 RULES:
 - The project is preconfigured: Vite, React 18, and Tailwind v4 (@tailwindcss/vite) are set up; src/index.css already has @import "tailwindcss". The entry is src/main.jsx rendering src/App.jsx. Don't change build config unless strictly necessary.

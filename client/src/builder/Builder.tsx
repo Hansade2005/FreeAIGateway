@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, ChevronLeft, ChevronRight, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search, MousePointerClick } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
 import { Markdown } from './Markdown'
@@ -147,6 +147,19 @@ export function Builder() {
       const timer = setTimeout(() => { pendingReqs.current.delete(id); resolve({ error: 'timed out' }) }, timeout)
       pendingReqs.current.set(id, (v) => { clearTimeout(timer); resolve(v) })
       win.postMessage({ __fagReq: type, id }, '*')
+    })
+  }
+
+  // Run a DOM-control command inside the preview (click/fill/scroll/inspect/
+  // press_key/evaluate) and get its result back over the same RPC channel.
+  function previewCmd(cmd: string, args: any, timeout = 10000): Promise<{ result?: any; error?: string }> {
+    return new Promise((resolve) => {
+      const win = previewIframeRef.current?.contentWindow
+      if (!win) return resolve({ error: 'preview not running' })
+      const id = Math.random().toString(36).slice(2)
+      const timer = setTimeout(() => { pendingReqs.current.delete(id); resolve({ error: 'timed out' }) }, timeout)
+      pendingReqs.current.set(id, (v) => { clearTimeout(timer); resolve({ result: v.result, error: v.error }) })
+      win.postMessage({ __fagReq: 'cmd', id, cmd, args }, '*')
     })
   }
 
@@ -365,6 +378,7 @@ export function Builder() {
         getConsoleLogs: async () => consoleRef.current.slice(-100).join('\n') || '(no console output yet)',
         readDom: async () => { const r = await requestFromPreview('dom'); return r.html ?? `(could not read DOM: ${r.error ?? 'unknown'})` },
         screenshot: async () => { const r = await requestFromPreview('shot', 30000); return { dataUrl: r.dataUrl, error: r.error } },
+        preview: async (cmd, args) => previewCmd(cmd, args),
         webSearch: async (query) => {
           try {
             const res = await fetch('https://r.jina.ai/https://html.duckduckgo.com/html?q=' + encodeURIComponent(query), { headers: { Accept: 'text/plain' } })
@@ -1032,6 +1046,7 @@ function ActionPill({ action, onOpen }: { action: StoredAction; onOpen: (path: s
     : action.kind === 'file' ? FileText
     : action.kind === 'search' ? Search
     : action.kind === 'fetch' ? Globe
+    : action.kind === 'interact' ? MousePointerClick
     : FileSearch
 
   // File/image/delete → click to open in the Code tab.
