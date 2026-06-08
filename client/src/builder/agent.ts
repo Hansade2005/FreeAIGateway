@@ -22,11 +22,12 @@ export const BUILDER_TOOLS: ToolDef[] = [
   { type: 'function', function: { name: 'web_fetch', description: 'Fetch a URL and return its readable content as text/markdown. Use to read a documentation page or a result found via web_search.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'the full URL to fetch' } }, required: ['url'] } } },
   // Live DOM control of the running preview (same-origin bridge): drive the app
   // like a user to verify behavior, not just read it.
-  { type: 'function', function: { name: 'inspect_page', description: 'Inspect the running app. With a CSS selector: returns that element\'s tag, text, bounding rect, computed styles (color, font, spacing, etc.) and attributes — ground truth for debugging styling/layout. Without a selector: returns the page url, title, and visible text.', parameters: { type: 'object', properties: { selector: { type: 'string', description: 'optional CSS selector' } } } } },
-  { type: 'function', function: { name: 'click', description: 'Click an element in the running app (realistic pointer+mouse sequence, React-safe).', parameters: { type: 'object', properties: { selector: { type: 'string' } }, required: ['selector'] } } },
-  { type: 'function', function: { name: 'fill', description: 'Set the value of an input/textarea in the running app (uses the native setter so React onChange fires).', parameters: { type: 'object', properties: { selector: { type: 'string' }, value: { type: 'string' } }, required: ['selector', 'value'] } } },
-  { type: 'function', function: { name: 'press_key', description: 'Dispatch a keyboard key (e.g. "Enter", "Escape", "Tab") to an element (or the focused element if no selector). Optional modifiers.', parameters: { type: 'object', properties: { key: { type: 'string' }, selector: { type: 'string' }, modifiers: { type: 'object', description: 'e.g. { ctrl: true, shift: true }' } }, required: ['key'] } } },
-  { type: 'function', function: { name: 'scroll', description: 'Scroll the page or a scrollable element. `to` is "top", "bottom", or a pixel offset.', parameters: { type: 'object', properties: { to: { type: 'string', description: '"top" | "bottom" | pixel number' }, selector: { type: 'string', description: 'optional element to scroll instead of the page' } }, required: ['to'] } } },
+  { type: 'function', function: { name: 'snapshot', description: 'Get a Playwright-style accessibility snapshot of the running app: a tree of roles + names with stable [ref=eN] handles. Call this FIRST to see what is on the page, then pass a ref to click/fill/inspect_page/press_key/scroll instead of guessing CSS selectors.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'inspect_page', description: 'Inspect the running app. With a ref (from snapshot) or CSS selector: returns that element\'s tag, text, bounding rect, computed styles (color, font, spacing, etc.) and attributes — ground truth for debugging styling/layout. With neither: returns the page url, title, and visible text.', parameters: { type: 'object', properties: { ref: { type: 'string', description: 'element ref from snapshot, e.g. e5' }, selector: { type: 'string', description: 'CSS selector (alternative to ref)' } } } } },
+  { type: 'function', function: { name: 'click', description: 'Click an element in the running app (realistic pointer+mouse sequence, React-safe). Target it by ref (from snapshot) or CSS selector.', parameters: { type: 'object', properties: { ref: { type: 'string' }, selector: { type: 'string' } } } } },
+  { type: 'function', function: { name: 'fill', description: 'Set the value of an input/textarea in the running app (native setter so React onChange fires). Target by ref (from snapshot) or CSS selector.', parameters: { type: 'object', properties: { ref: { type: 'string' }, selector: { type: 'string' }, value: { type: 'string' } }, required: ['value'] } } },
+  { type: 'function', function: { name: 'press_key', description: 'Dispatch a keyboard key (e.g. "Enter", "Escape", "Tab") to an element (by ref or selector; or the focused element if neither). Optional modifiers.', parameters: { type: 'object', properties: { key: { type: 'string' }, ref: { type: 'string' }, selector: { type: 'string' }, modifiers: { type: 'object', description: 'e.g. { ctrl: true, shift: true }' } }, required: ['key'] } } },
+  { type: 'function', function: { name: 'scroll', description: 'Scroll the page or a scrollable element (by ref or selector). `to` is "top", "bottom", or a pixel offset.', parameters: { type: 'object', properties: { to: { type: 'string', description: '"top" | "bottom" | pixel number' }, ref: { type: 'string' }, selector: { type: 'string' } }, required: ['to'] } } },
   { type: 'function', function: { name: 'evaluate', description: 'Run arbitrary JavaScript inside the running app and return the (JSON-serializable) result. Use for anything not covered by the other tools — submit a form (document.querySelector(\'form\').requestSubmit()), check state, drive inner scrollbars, etc.', parameters: { type: 'object', properties: { code: { type: 'string', description: 'a JS expression or statements; its value is returned' } }, required: ['code'] } } },
 ]
 
@@ -246,29 +247,36 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         sub.next({ type: 'action', action: { kind: 'fetch', label: `fetched ${url}`, output: out.slice(0, 4000) } })
         return { content: out.slice(0, 12000) }
       }
+      case 'snapshot': {
+        const r = await ex.preview('snapshot', {})
+        const out = r.error ? `error: ${r.error}` : String(r.result)
+        sub.next({ type: 'action', action: { kind: 'interact', label: 'page snapshot', output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 8000) }
+      }
       case 'inspect_page': {
-        const r = await ex.preview('inspect', { selector: args.selector })
+        const tgt = args.ref ?? args.selector
+        const r = await ex.preview('inspect', { ref: args.ref, selector: args.selector })
         const out = r.error ? `error: ${r.error}` : JSON.stringify(r.result, null, 2)
-        sub.next({ type: 'action', action: { kind: 'interact', label: args.selector ? `inspected ${args.selector}` : 'inspected page', output: out.slice(0, 4000) } })
+        sub.next({ type: 'action', action: { kind: 'interact', label: tgt ? `inspected ${tgt}` : 'inspected page', output: out.slice(0, 4000) } })
         return { content: out.slice(0, 6000) }
       }
       case 'click': {
-        const r = await ex.preview('click', { selector: args.selector })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `click ${args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
+        const r = await ex.preview('click', { ref: args.ref, selector: args.selector })
+        sub.next({ type: 'action', action: { kind: 'interact', label: `click ${args.ref ?? args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
         return { content: r.error ? `click failed: ${r.error}` : `ok: ${r.result}` }
       }
       case 'fill': {
-        const r = await ex.preview('fill', { selector: args.selector, value: args.value })
-        sub.next({ type: 'action', action: { kind: 'interact', label: `fill ${args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
+        const r = await ex.preview('fill', { ref: args.ref, selector: args.selector, value: args.value })
+        sub.next({ type: 'action', action: { kind: 'interact', label: `fill ${args.ref ?? args.selector}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
         return { content: r.error ? `fill failed: ${r.error}` : `ok: ${r.result}` }
       }
       case 'press_key': {
-        const r = await ex.preview('pressKey', { key: args.key, selector: args.selector, modifiers: args.modifiers })
+        const r = await ex.preview('pressKey', { key: args.key, ref: args.ref, selector: args.selector, modifiers: args.modifiers })
         sub.next({ type: 'action', action: { kind: 'interact', label: `key ${args.key}`, output: r.error ? `error: ${r.error}` : String(r.result) } })
         return { content: r.error ? `press_key failed: ${r.error}` : `ok: ${r.result}` }
       }
       case 'scroll': {
-        const r = await ex.preview('scroll', { to: args.to, selector: args.selector })
+        const r = await ex.preview('scroll', { to: args.to, ref: args.ref, selector: args.selector })
         sub.next({ type: 'action', action: { kind: 'interact', label: `scroll ${args.to}`, output: r.error ? `error: ${r.error}` : JSON.stringify(r.result) } })
         return { content: r.error ? `scroll failed: ${r.error}` : `ok: ${JSON.stringify(r.result)}` }
       }
