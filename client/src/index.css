@@ -323,7 +323,16 @@
         color: transparent;
         animation: sheen 6s linear infinite;
     }
+    /* Shimmering text for the agent's "Working…" indicator. */
+    .shimmer {
+        background: linear-gradient(100deg, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 30%, var(--foreground) 50%, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 70%);
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: sheen 1.6s linear infinite;
+    }
     @media (prefers-reduced-motion: reduce) {
-        .animate-rise, .stagger > *, .status-dot::after, .sheen { animation: none !important; }
+        .animate-rise, .stagger > *, .status-dot::after, .sheen, .shimmer { animation: none !important; }
     }
 }
