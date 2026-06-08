@@ -159,8 +159,9 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         return { content: content == null ? `not found: ${path}` : content }
       }
       case 'list_files': {
-        sub.next({ type: 'action', action: { kind: 'list', label: 'listed files' } })
-        return { content: ex.listFiles().join('\n') }
+        const files = ex.listFiles()
+        sub.next({ type: 'action', action: { kind: 'list', label: 'listed files', output: files.join('\n') || '(no files)' } })
+        return { content: files.join('\n') }
       }
       case 'delete_file': {
         const path = norm(String(args.path ?? ''))
@@ -202,7 +203,7 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
       case 'screenshot': {
         const shot = await ex.screenshot()
         if (shot.error || !shot.dataUrl) {
-          sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot failed' } })
+          sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot failed', output: shot.error ?? 'no image' } })
           return { content: `screenshot failed: ${shot.error ?? 'no image'}` }
         }
         sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot', image: shot.dataUrl } })
