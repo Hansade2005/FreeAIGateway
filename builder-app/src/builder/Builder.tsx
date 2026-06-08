@@ -96,7 +96,7 @@ async function ensureParentLinks(all: Message[]): Promise<Message[]> {
   return sorted
 }
 
-export function Builder({ onEditProvider }: { onEditProvider?: () => void } = {}) {
+export function Builder({ onEditProvider, onHome, initialPrompt }: { onEditProvider?: () => void; onHome?: () => void; initialPrompt?: string } = {}) {
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [messages, setMessages] = useState<Message[]>([]) // active branch path (rendered)
@@ -138,6 +138,7 @@ export function Builder({ onEditProvider }: { onEditProvider?: () => void } = {}
   const pendingReqs = useRef<Map<string, (v: any) => void>>(new Map())
   const chatEnd = useRef<HTMLDivElement>(null)
   const booted = useRef(false)
+  const autoSent = useRef(false)
 
   // Ask the preview (cross-origin iframe) for its DOM / a screenshot via postMessage.
   function requestFromPreview(type: 'dom' | 'shot', timeout = 20000): Promise<any> {
@@ -166,6 +167,16 @@ export function Builder({ onEditProvider }: { onEditProvider?: () => void } = {}
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, running])
   useEffect(() => { localStorage.setItem(CHATW_KEY, String(chatWidth)) }, [chatWidth])
+
+  // Auto-run the prompt the user typed on the Home screen, once the sandbox is
+  // up and the (brand-new) project has no messages yet.
+  useEffect(() => {
+    if (autoSent.current || !initialPrompt) return
+    if (status === 'ready' && project && !running && messages.length === 0) {
+      autoSent.current = true
+      send(initialPrompt)
+    }
+  }, [status, project, running, messages.length, initialPrompt])
 
   // Preview→builder channel: errors, console output, and replies to our DOM /
   // screenshot requests. Its OWN effect (not behind the boot guard) so React
@@ -635,9 +646,9 @@ export function Builder({ onEditProvider }: { onEditProvider?: () => void } = {}
     <div className="flex h-screen flex-col bg-background text-foreground">
       {/* Top bar */}
       <header className="flex items-center gap-3 border-b px-4 py-2.5">
-        <a href="/" className="flex items-center gap-2 text-sm font-semibold hover:opacity-80">
-          <Sparkles className="size-4 text-signal" /> FreeAIGateway <span className="text-muted-foreground">Builder</span>
-        </a>
+        <button onClick={onHome} className="flex items-center gap-2 text-sm font-semibold hover:opacity-80" title="Home">
+          <Sparkles className="size-4 text-signal" /> AI Builder
+        </button>
         <span className="text-muted-foreground/40">/</span>
         {project && <EditableName name={project.name} onRename={(n) => handleRename(project.id, n)} />}
         <button onClick={() => setShowProjects(true)} className="ml-1 flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="All apps">
