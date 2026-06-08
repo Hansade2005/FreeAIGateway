@@ -14,6 +14,8 @@ TOOLS:
 - get_console_logs(): the running app's recent console output and runtime errors — use it to debug behavior.
 - read_dom(): the current rendered HTML of the running app — use it to see what's actually on the page when debugging UI/layout.
 - screenshot(): a visual capture of the running app — use it to inspect the UI's appearance.
+- web_search(query): search the web for current info — docs, libraries, APIs, examples. Returns titles, snippets, and links.
+- web_fetch(url): fetch a URL and read its content as text/markdown (e.g. open a docs page or a search result).
 
 DEBUGGING: when something looks or behaves wrong, inspect before guessing — call get_console_logs for errors, read_dom to see the rendered output, and/or screenshot to see the UI — then fix.
 

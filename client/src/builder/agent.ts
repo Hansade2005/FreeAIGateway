@@ -18,9 +18,11 @@ export const BUILDER_TOOLS: ToolDef[] = [
   { type: 'function', function: { name: 'get_console_logs', description: 'Get the recent console output and runtime errors from the running app — use this to debug behavior.', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'read_dom', description: 'Get the current rendered HTML of the running app so you can see what is actually on the page (great for debugging UI/layout).', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'screenshot', description: 'Capture a screenshot of the running app to visually inspect the UI.', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'web_search', description: 'Search the web for current information — docs, libraries, examples, APIs, news. Returns result titles, snippets, and links.', parameters: { type: 'object', properties: { query: { type: 'string', description: 'the search query' } }, required: ['query'] } } },
+  { type: 'function', function: { name: 'web_fetch', description: 'Fetch a URL and return its readable content as text/markdown. Use to read a documentation page or a result found via web_search.', parameters: { type: 'object', properties: { url: { type: 'string', description: 'the full URL to fetch' } }, required: ['url'] } } },
 ]
 
-export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot' | 'design'
+export type ActionKind = 'file' | 'image' | 'command' | 'delete' | 'read' | 'list' | 'console' | 'dom' | 'screenshot' | 'design' | 'search' | 'fetch'
 export interface AgentAction { kind: ActionKind; label: string; path?: string; output?: string; image?: string }
 
 export type AgentEvent =
@@ -43,6 +45,8 @@ export interface Executors {
   getConsoleLogs: () => Promise<string>
   readDom: () => Promise<string>
   screenshot: () => Promise<{ dataUrl?: string; error?: string }>
+  webSearch: (query: string) => Promise<string>
+  webFetch: (url: string) => Promise<string>
 }
 
 export interface AgentRun {
@@ -208,6 +212,20 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
         }
         sub.next({ type: 'action', action: { kind: 'screenshot', label: 'screenshot', image: shot.dataUrl } })
         return { content: 'Screenshot captured — see the attached image of the rendered UI.', image: shot.dataUrl }
+      }
+      case 'web_search': {
+        const query = String(args.query ?? '').trim()
+        if (!query) return { content: 'error: missing query' }
+        const out = await ex.webSearch(query)
+        sub.next({ type: 'action', action: { kind: 'search', label: `searched ${query}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 8000) }
+      }
+      case 'web_fetch': {
+        const url = String(args.url ?? '').trim()
+        if (!url) return { content: 'error: missing url' }
+        const out = await ex.webFetch(url)
+        sub.next({ type: 'action', action: { kind: 'fetch', label: `fetched ${url}`, output: out.slice(0, 4000) } })
+        return { content: out.slice(0, 12000) }
       }
       default:
         return { content: `unsupported tool: ${name}` }
