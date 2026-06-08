@@ -560,7 +560,6 @@ export function Builder() {
                 const showWriting = m.role === 'assistant' && running && isLast && !!writing
                 const showActionRow = !running || !isLast
                 const openInCode = (p: string) => { setSelected(p); setTab('code') }
-                const empty = !m.content && (!m.parts || m.parts.length === 0)
                 return (
                   <div key={m.id ?? i} className={`group relative rounded-xl px-3 py-2 text-sm ${isUser ? 'ml-6 bg-signal-muted' : 'mr-2 border bg-surface-1'}`}>
                     <div className="mb-0.5 font-mono text-[10px] uppercase tracking-wide text-muted-foreground">{m.role}</div>
@@ -572,12 +571,12 @@ export function Builder() {
                         {m.parts.map((part, k) => part.type === 'text'
                           ? (cleanText(part.text) ? <Markdown key={k}>{cleanText(part.text)}</Markdown> : null)
                           : <ActionPill key={k} action={part.action} onOpen={openInCode} />)}
-                        {empty && running && isLast && !showWriting && <div className="text-muted-foreground">Thinking…</div>}
                         {showWriting && (
                           <span className="flex items-center gap-1.5 self-start rounded-md border border-signal/40 bg-signal-muted px-2 py-1 font-mono text-[11px] text-signal">
                             <Loader2 className="size-3 animate-spin" /> writing {writing}…
                           </span>
                         )}
+                        {running && isLast && <span className="shimmer self-start font-mono text-[12px] font-medium">Working…</span>}
                       </div>
                     ) : (
                       // Legacy messages (pre-timeline): prose then grouped pills.
