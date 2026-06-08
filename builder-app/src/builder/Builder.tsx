@@ -383,8 +383,8 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
           await ws.current?.deleteFile(path)
           clearConsole()
         },
-        generateImage: async (p, path) => {
-          const bytes = await generateImageBytes(p)
+        generateImage: async (p, path, aspect) => {
+          const bytes = await generateImageBytes(p, aspect)
           assetsRef.current = { ...assetsRef.current, [path]: bytes }
           await ws.current?.writeBinary(path, bytes)
           if (project) await saveAssets(project.id, assetsRef.current)
