@@ -5,7 +5,7 @@ import { PACKAGE_LOCK } from './template-lock'
 // builder and answers DOM / screenshot requests over postMessage. Shipped in the
 // template's index.html AND injected into older projects that predate it.
 export const PREVIEW_BRIDGE = `<script>
-  /* fag-bridge:3 */
+  /* fag-bridge:4 */
   (function () {
     function post(p) { try { parent.postMessage(p, '*'); } catch (e) {} }
     function send(kind, message, stack) { post({ __fagPreview: true, kind: kind, message: String(message), stack: stack ? String(stack) : '' }); }
@@ -25,6 +25,63 @@ export const PREVIEW_BRIDGE = `<script>
     // reflects only the freshly-loaded page (no leftover pre-fix errors).
     post({ __fagReset: true });
     window.addEventListener('load', function () { post({ __fagReset: true }); });
+
+    // ── Agent DOM-control commands (same-origin → full control of the app) ──
+    function $q(s) { return document.querySelector(s); }
+    function must(s) { var el = $q(s); if (!el) throw new Error('No element matches: ' + s); return el; }
+    function clamp(t, n) { t = t || ''; return t.length > n ? t.slice(0, n) + '…' : t; }
+    function centerOf(el) { var r = el.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; }
+    // Dispatch a full, framework-friendly pointer + mouse sequence (React-safe).
+    function realClick(el, button) {
+      try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+      var c = centerOf(el);
+      var base = { bubbles: true, cancelable: true, composed: true, clientX: c.x, clientY: c.y, button: button || 0, view: window };
+      try { el.dispatchEvent(new PointerEvent('pointerdown', Object.assign({ pointerId: 1, isPrimary: true }, base))); } catch (e) {}
+      el.dispatchEvent(new MouseEvent('mousedown', base));
+      try { el.dispatchEvent(new PointerEvent('pointerup', Object.assign({ pointerId: 1, isPrimary: true }, base))); } catch (e) {}
+      el.dispatchEvent(new MouseEvent('mouseup', base));
+      el.dispatchEvent(new MouseEvent('click', base));
+    }
+    // React tracks input state internally — assigning el.value is ignored. Use the
+    // native setter so the framework's onChange actually fires.
+    function setNativeValue(el, value) {
+      var proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      var d = Object.getOwnPropertyDescriptor(proto, 'value');
+      if (d && d.set) d.set.call(el, value); else el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    function pressKeyOn(el, key, mods) {
+      mods = mods || {}; var t = el || document.activeElement || document.body;
+      var o = { bubbles: true, cancelable: true, key: key, ctrlKey: !!mods.ctrl, shiftKey: !!mods.shift, altKey: !!mods.alt, metaKey: !!mods.meta };
+      t.dispatchEvent(new KeyboardEvent('keydown', o));
+      t.dispatchEvent(new KeyboardEvent('keyup', o));
+    }
+    function safe(v) { try { return JSON.parse(JSON.stringify(v === undefined ? null : v)); } catch (e) { return String(v); } }
+    var COMMANDS = {
+      inspect: function (a) {
+        if (!a.selector) return { url: location.href, title: document.title, text: clamp(document.body && document.body.innerText, 4000) };
+        var el = must(a.selector); var cs = getComputedStyle(el); var r = el.getBoundingClientRect();
+        var keys = ['color', 'background-color', 'font-size', 'font-family', 'font-weight', 'line-height', 'display', 'padding', 'margin', 'border', 'border-radius', 'width', 'height', 'position', 'opacity', 'box-shadow'];
+        var styles = {}; keys.forEach(function (k) { styles[k] = cs.getPropertyValue(k); });
+        var attrs = {}; for (var i = 0; i < el.attributes.length; i++) attrs[el.attributes[i].name] = el.attributes[i].value;
+        return { tag: el.tagName.toLowerCase(), text: clamp(el.innerText, 500), rect: { x: r.x, y: r.y, w: r.width, h: r.height }, styles: styles, attributes: attrs };
+      },
+      click: function (a) { realClick(must(a.selector), a.button || 0); return 'clicked ' + a.selector; },
+      fill: function (a) { setNativeValue(must(a.selector), a.value == null ? '' : String(a.value)); return 'filled ' + a.selector; },
+      pressKey: function (a) { pressKeyOn(a.selector ? $q(a.selector) : null, a.key, a.modifiers); return 'pressed ' + a.key; },
+      scroll: function (a) {
+        var el = a.selector ? must(a.selector) : null; var to = a.to;
+        if (to === 'bottom') { var h = el ? el.scrollHeight : document.body.scrollHeight; if (el) el.scrollTop = h; else window.scrollTo({ top: h }); }
+        else if (to === 'top') { if (el) el.scrollTop = 0; else window.scrollTo({ top: 0 }); }
+        else { var n = Number(to) || 0; if (el) el.scrollTop = n; else window.scrollTo({ top: n }); }
+        return el ? { scrollTop: el.scrollTop } : { scrollY: window.scrollY };
+      },
+      // Arbitrary JS escape hatch (submit forms, inject scripts, drive scrollbars,
+      // anything). Result is JSON-sanitized for postMessage.
+      evaluate: function (a) { return Promise.resolve((0, eval)(a.code)).then(safe); },
+    };
+
     window.addEventListener('message', function (e) {
       var d = e.data || {};
       if (d.__fagReq === 'dom') {
@@ -43,6 +100,16 @@ export const PREVIEW_BRIDGE = `<script>
             post({ __fagRes: 'shot', id: d.id, dataUrl: dataUrl });
           } catch (err) { post({ __fagRes: 'shot', id: d.id, error: String((err && err.message) || err) }); }
         })();
+      } else if (d.__fagReq === 'cmd') {
+        Promise.resolve().then(function () {
+          var fn = COMMANDS[d.cmd];
+          if (!fn) throw new Error('unknown command: ' + d.cmd);
+          return fn(d.args || {});
+        }).then(function (result) {
+          post({ __fagRes: 'cmd', id: d.id, result: result === undefined ? null : result });
+        }).catch(function (err) {
+          post({ __fagRes: 'cmd', id: d.id, error: String((err && err.message) || err) });
+        });
       }
     });
   })();
@@ -50,7 +117,7 @@ export const PREVIEW_BRIDGE = `<script>
 
 // Marker baked into the current bridge so we can tell whether a project already
 // has the latest version (and skip rewriting it).
-const BRIDGE_MARKER = 'fag-bridge:3'
+const BRIDGE_MARKER = 'fag-bridge:4'
 // Matches a previously-injected bridge script (any version) so it can be
 // stripped and replaced — attribute-less <script> blocks that reference our
 // postMessage protocol. The app's own `<script type="module">` is untouched.
