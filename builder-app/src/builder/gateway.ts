@@ -46,30 +46,17 @@ export async function streamChat(messages: ChatMsg[], opts: StreamOpts): Promise
   }
 }
 
-// Generate an image via the provider's OpenAI-style /images/generations endpoint
-// (only used when an image model is configured). Returns raw PNG/JPEG bytes.
-export async function generateImageBytes(prompt: string): Promise<Uint8Array> {
-  const imageModel = getProvider()?.imageModel?.trim()
-  const res = await fetch(`${apiBase()}/images/generations`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ prompt, ...(imageModel ? { model: imageModel } : {}), n: 1 }),
-  })
-  if (!res.ok) throw new Error('image generation failed')
-  const data = (await res.json())?.data?.[0]
-  // OpenAI returns either a hosted url or base64 (b64_json).
-  if (data?.b64_json) {
-    const bin = atob(data.b64_json)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    return bytes
-  }
-  if (data?.url) {
-    const img = await fetch(data.url)
-    if (!img.ok) throw new Error('could not fetch generated image')
-    return new Uint8Array(await img.arrayBuffer())
-  }
-  throw new Error('no image returned')
+// Generate an image from a text prompt and return its raw bytes (webp). Backed
+// by a0.dev's free, keyless image endpoint — provider-independent, so it works
+// no matter which OpenAI-compatible chat API the user configured (most don't
+// expose an /images endpoint).
+export async function generateImageBytes(prompt: string, aspect = '1:1'): Promise<Uint8Array> {
+  const url = `https://api.a0.dev/assets/image?text=${encodeURIComponent(prompt)}&aspect=${encodeURIComponent(aspect)}`
+  const res = await fetch(url) // 302 → the generated image; fetch follows it
+  if (!res.ok) throw new Error(`image generation failed (HTTP ${res.status})`)
+  const buf = await res.arrayBuffer()
+  if (!buf.byteLength) throw new Error('image generation returned no data')
+  return new Uint8Array(buf)
 }
 
 async function once(messages: ChatMsg[], model: string, opts: StreamOpts): Promise<{ text: string; toolCalls: ToolCall[] }> {

@@ -14,7 +14,7 @@ export const BUILDER_TOOLS: ToolDef[] = [
   { type: 'function', function: { name: 'read_file', description: 'Read a file to inspect its current contents before editing.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'list_files', description: 'List all files in the project.', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'delete_file', description: 'Delete a file from the project.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'generate_image', description: 'Generate an image asset from a text prompt and save it (use public/ paths, reference as /name in code).', parameters: { type: 'object', properties: { prompt: { type: 'string' }, path: { type: 'string', description: 'e.g. public/hero.png' } }, required: ['prompt', 'path'] } } },
+  { type: 'function', function: { name: 'generate_image', description: 'Generate a real image from a text prompt and save it as a project asset (use public/ paths, e.g. public/hero.webp, reference as /hero.webp in code). Free, no setup. Output is webp.', parameters: { type: 'object', properties: { prompt: { type: 'string', description: 'what the image should depict' }, path: { type: 'string', description: 'e.g. public/hero.webp' }, aspect: { type: 'string', description: 'aspect ratio, e.g. "1:1", "16:9", "4:3" (default 1:1)' } }, required: ['prompt', 'path'] } } },
   { type: 'function', function: { name: 'run_command', description: 'Run a shell command (e.g. "npm install recharts"). Prefer the dev server\'s live errors over full rebuilds; only run "npm run build" when you specifically need a production build check.', parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] } } },
   { type: 'function', function: { name: 'get_console_logs', description: 'Get the recent console output and runtime errors from the running app — use this to debug behavior.', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'read_dom', description: 'Get the current rendered HTML of the running app so you can see what is actually on the page (great for debugging UI/layout).', parameters: { type: 'object', properties: {} } } },
@@ -50,7 +50,7 @@ export interface Executors {
   readFile: (path: string) => Promise<string | null>
   listFiles: () => string[]
   deleteFile: (path: string) => Promise<void>
-  generateImage: (prompt: string, path: string) => Promise<void>
+  generateImage: (prompt: string, path: string, aspect?: string) => Promise<void>
   runCommand: (command: string) => Promise<{ output: string; exitCode: number }>
   getConsoleLogs: () => Promise<string>
   readDom: () => Promise<string>
@@ -105,10 +105,9 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
       { role: 'user', content: run.userPrompt },
     ]
 
-    // Only advertise generate_image when an image model is configured.
-    const tools = getProvider()?.imageModel?.trim()
-      ? BUILDER_TOOLS
-      : BUILDER_TOOLS.filter((t) => t.function.name !== 'generate_image')
+    // generate_image is always available (backed by a0.dev's free image
+    // endpoint, independent of the chat provider).
+    const tools = BUILDER_TOOLS
 
     // Weak/free models often stall: they narrate ("I'll create the files…"),
     // sometimes even writing a tool call as TEXT, then end the turn with no real
@@ -235,7 +234,11 @@ async function execute(call: ToolCall, ex: Executors, sub: { next: (e: AgentEven
       }
       case 'generate_image': {
         const path = norm(String(args.path ?? ''))
-        await ex.generateImage(String(args.prompt ?? ''), path)
+        try {
+          await ex.generateImage(String(args.prompt ?? ''), path, args.aspect ? String(args.aspect) : undefined)
+        } catch (e: any) {
+          return { content: `image generation failed: ${e?.message ?? e}` }
+        }
         sub.next({ type: 'action', action: { kind: 'image', label: `generated ${path}`, path } })
         return { content: `ok: generated image at ${path}` }
       }
