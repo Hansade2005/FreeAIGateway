@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
@@ -10,10 +10,42 @@ import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
   type Project, type Message, type StoredAction, type MessagePart,
-  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter, renameProject, deleteProject,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
+const DEFAULT_NAME = 'Untitled app'
+
+// True for names the user never set themselves (so we can auto-name from the
+// first prompt without clobbering a name they chose).
+function isDefaultName(name: string): boolean {
+  return name === DEFAULT_NAME || name === 'My app' || /^Untitled app( \d+)?$/.test(name)
+}
+
+// A unique default name so brand-new (not-yet-prompted) apps don't all collide.
+function uniqueDefaultName(existing: Project[]): string {
+  const names = new Set(existing.map((p) => p.name))
+  if (!names.has(DEFAULT_NAME)) return DEFAULT_NAME
+  let n = 2
+  while (names.has(`${DEFAULT_NAME} ${n}`)) n++
+  return `${DEFAULT_NAME} ${n}`
+}
+
+// Derive a readable app title from the user's first prompt (Lovable-style).
+function titleFromPrompt(s: string): string {
+  const t = s.trim().replace(/\s+/g, ' ')
+  if (!t) return DEFAULT_NAME
+  const short = t.length > 48 ? t.slice(0, 48).trimEnd() + '…' : t
+  return short.charAt(0).toUpperCase() + short.slice(1)
+}
+
+function timeAgo(t: number): string {
+  const s = Math.floor((Date.now() - t) / 1000)
+  if (s < 60) return 'just now'
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24); return `${d}d ago`
+}
 
 export function Builder() {
   const [project, setProject] = useState<Project | null>(null)
@@ -30,6 +62,7 @@ export function Builder() {
   const [writing, setWriting] = useState('')
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [fatal, setFatal] = useState('')
+  const [showProjects, setShowProjects] = useState(false)
 
   const ws = useRef<Workspace | null>(null)
   const filesRef = useRef<Record<string, string>>({})
@@ -92,7 +125,7 @@ export function Builder() {
       setProjects(all)
       const lastId = localStorage.getItem(LAST_KEY)
       let proj = (lastId && (await getProject(lastId))) || all[0] || null
-      if (!proj) proj = await createProject('My app', { ...STARTER_FILES })
+      if (!proj) proj = await createProject(uniqueDefaultName(all), { ...STARTER_FILES })
       localStorage.setItem(LAST_KEY, proj.id)
       // Older projects predate the preview bridge — inject it so read_dom /
       // screenshot work (otherwise they hang/time out).
@@ -153,6 +186,14 @@ export function Builder() {
     const userMsg: Message = { projectId: project.id, role: 'user', content: prompt, checkpoint, createdAt: Date.now() }
     setMessages((m) => [...m, userMsg, { projectId: project.id, role: 'assistant', content: '', actions: [], parts: [], createdAt: Date.now() }])
     await addMessage({ projectId: project.id, role: 'user', content: prompt, checkpoint })
+
+    // Auto-name the app from its first prompt (unless the user named it already).
+    if (messages.every((m) => m.role !== 'user') && isDefaultName(project.name)) {
+      const name = titleFromPrompt(prompt)
+      await renameProject(project.id, name)
+      setProject((p) => (p ? { ...p, name } : p))
+      setProjects((ps) => ps.map((p) => (p.id === project.id ? { ...p, name } : p)))
+    }
 
     const history = messages.slice(-8).map((m) => ({ role: m.role, content: m.content }))
     const recentErrors = errors
@@ -303,13 +344,35 @@ export function Builder() {
   }
 
   async function newProject() {
-    const p = await createProject('My app', { ...STARTER_FILES })
+    const p = await createProject(uniqueDefaultName(projects), { ...STARTER_FILES })
     localStorage.setItem(LAST_KEY, p.id)
     location.reload()
   }
-  async function openProject(id: string) {
+  function openProject(id: string) {
+    if (id === project?.id) { setShowProjects(false); return }
     localStorage.setItem(LAST_KEY, id)
     location.reload()
+  }
+
+  async function handleRename(id: string, name: string) {
+    const clean = name.trim()
+    if (!clean) return
+    await renameProject(id, clean)
+    setProjects((ps) => ps.map((p) => (p.id === id ? { ...p, name: clean } : p)))
+    if (project?.id === id) setProject((p) => (p ? { ...p, name: clean } : p))
+  }
+
+  async function handleDelete(id: string) {
+    if (!confirm('Delete this app and its chat history? This cannot be undone.')) return
+    await deleteProject(id)
+    if (id === project?.id) {
+      const next = projects.find((p) => p.id !== id)
+      if (next) localStorage.setItem(LAST_KEY, next.id)
+      else localStorage.removeItem(LAST_KEY)
+      location.reload()
+      return
+    }
+    setProjects((ps) => ps.filter((p) => p.id !== id))
   }
 
   const statusLabel: Record<WCStatus, string> = {
@@ -324,16 +387,12 @@ export function Builder() {
         <a href="/" className="flex items-center gap-2 text-sm font-semibold hover:opacity-80">
           <Sparkles className="size-4 text-signal" /> FreeAIGateway <span className="text-muted-foreground">Builder</span>
         </a>
-        <select
-          value={project?.id ?? ''}
-          onChange={(e) => openProject(e.target.value)}
-          className="ml-2 rounded-lg border bg-surface-1 px-2 py-1 text-xs"
-          title="Switch project"
-        >
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          {project && !projects.find((p) => p.id === project.id) && <option value={project.id}>{project.name}</option>}
-        </select>
-        <button onClick={newProject} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="New project">
+        <span className="text-muted-foreground/40">/</span>
+        {project && <EditableName name={project.name} onRename={(n) => handleRename(project.id, n)} />}
+        <button onClick={() => setShowProjects(true)} className="ml-1 flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="All apps">
+          <LayoutGrid className="size-3.5" /> Apps
+        </button>
+        <button onClick={newProject} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="New app">
           <Plus className="size-3.5" /> New
         </button>
         <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
@@ -486,6 +545,18 @@ export function Builder() {
           </div>
         </div>
       )}
+
+      {showProjects && (
+        <ProjectsModal
+          projects={projects}
+          currentId={project?.id ?? null}
+          onClose={() => setShowProjects(false)}
+          onOpen={openProject}
+          onNew={newProject}
+          onRename={handleRename}
+          onDelete={handleDelete}
+        />
+      )}
     </div>
   )
 }
@@ -512,6 +583,98 @@ function UserText({ text }: { text: string }) {
       <button onClick={() => setOpen((o) => !o)} className="mt-1 text-[11px] font-medium text-signal hover:underline">
         {open ? 'Show less' : 'Show more'}
       </button>
+    </div>
+  )
+}
+
+// Inline-editable app name. Click to edit; Enter commits, Escape cancels.
+function EditableName({ name, onRename, big }: { name: string; onRename: (n: string) => void; big?: boolean }) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState(name)
+  useEffect(() => { setVal(name) }, [name])
+  const size = big ? 'text-sm font-medium' : 'text-xs font-medium'
+  if (editing) {
+    const commit = () => { const t = val.trim(); if (t && t !== name) onRename(t); setEditing(false) }
+    return (
+      <input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+          else if (e.key === 'Escape') { setVal(name); setEditing(false) }
+        }}
+        className={`rounded-md border bg-background px-2 py-1 ${size} focus:outline-none focus:ring-2 focus:ring-signal/40`}
+      />
+    )
+  }
+  return (
+    <button onClick={() => setEditing(true)} className={`group/name flex items-center gap-1 rounded-md px-1.5 py-1 ${size} hover:bg-surface-2`} title="Rename app">
+      <span className="max-w-[200px] truncate">{name}</span>
+      <Pencil className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover/name:opacity-100" />
+    </button>
+  )
+}
+
+// "Apps" / sessions panel: every app with its details, plus rename / open /
+// delete. Reads file counts straight off each stored project.
+function ProjectsModal({ projects, currentId, onClose, onOpen, onNew, onRename, onDelete }: {
+  projects: Project[]
+  currentId: string | null
+  onClose: () => void
+  onOpen: (id: string) => void
+  onNew: () => void
+  onRename: (id: string, name: string) => void
+  onDelete: (id: string) => void
+}) {
+  const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt)
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[8vh]" onClick={onClose}>
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b px-5 py-3">
+          <div className="flex items-center gap-2">
+            <LayoutGrid className="size-4 text-signal" />
+            <h2 className="font-display text-base font-semibold">Your apps</h2>
+            <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{projects.length}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onNew} className="flex items-center gap-1 rounded-lg bg-signal px-2.5 py-1 text-xs font-semibold text-signal-foreground"><Plus className="size-3.5" /> New app</button>
+            <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-surface-2 hover:text-foreground"><X className="size-4" /></button>
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          {sorted.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">No apps yet.</div>}
+          <div className="flex flex-col gap-1.5">
+            {sorted.map((p) => {
+              const fileCount = Object.keys(p.files).filter((f) => !f.startsWith('node_modules') && f !== 'package-lock.json').length
+              const assetCount = Object.keys(p.assets ?? {}).length
+              const isCurrent = p.id === currentId
+              return (
+                <div key={p.id} className={`flex items-center gap-3 rounded-xl border px-3 py-2.5 ${isCurrent ? 'border-signal/50 bg-signal-muted' : 'bg-surface-1 hover:bg-surface-2'}`}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <EditableName name={p.name} onRename={(n) => onRename(p.id, n)} big />
+                      {isCurrent && <span className="rounded-full bg-signal/20 px-1.5 py-0.5 font-mono text-[10px] text-signal">open</span>}
+                    </div>
+                    <div className="mt-0.5 px-1.5 font-mono text-[11px] text-muted-foreground">
+                      {fileCount} file{fileCount === 1 ? '' : 's'}{assetCount ? ` · ${assetCount} asset${assetCount === 1 ? '' : 's'}` : ''} · edited {timeAgo(p.updatedAt)}
+                    </div>
+                  </div>
+                  {!isCurrent && (
+                    <button onClick={() => onOpen(p.id)} className="flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs hover:bg-background" title="Open app">
+                      <FolderOpen className="size-3.5" /> Open
+                    </button>
+                  )}
+                  <button onClick={() => onDelete(p.id)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive" title="Delete app">
+                    <Trash2 className="size-3.5" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
