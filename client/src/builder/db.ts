@@ -4,11 +4,29 @@ import Dexie, { type Table } from 'dexie'
 // lives in the browser — projects (their file snapshots) and chat history — so a
 // reload or crash resumes where you left off, no server state.
 
+// State of a single integration/connector for a project. Config (keys, urls) is
+// kept LOCAL in IndexedDB — the builder never ships it to a server.
+export interface IntegrationState {
+  connected: boolean
+  config?: Record<string, string>
+  connectedAt?: number
+}
+
+// Per-app settings: free-form metadata plus the integrations/feature config that
+// the Settings view manages. Designed to grow — add fields here and a section in
+// the Settings view; existing projects just read the defaults.
+export interface ProjectSettings {
+  description?: string
+  integrations?: Record<string, IntegrationState>
+  features?: Record<string, boolean>
+}
+
 export interface Project {
   id: string
   name: string
   files: Record<string, string>
   assets?: Record<string, Uint8Array> // generated binary assets (images)
+  settings?: ProjectSettings
   createdAt: number
   updatedAt: number
 }
@@ -88,6 +106,10 @@ export async function saveAssets(id: string, assets: Record<string, Uint8Array>)
 
 export async function renameProject(id: string, name: string): Promise<void> {
   await db.projects.update(id, { name, updatedAt: Date.now() })
+}
+
+export async function saveProjectSettings(id: string, settings: ProjectSettings): Promise<void> {
+  await db.projects.update(id, { settings, updatedAt: Date.now() })
 }
 
 export async function listProjects(): Promise<Project[]> {

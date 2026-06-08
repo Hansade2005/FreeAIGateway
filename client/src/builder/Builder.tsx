@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Subscription } from 'rxjs'
-import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen } from 'lucide-react'
+import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
+import { SettingsModal } from './SettingsModal'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
 import { CodeView } from './CodeView'
@@ -9,8 +10,8 @@ import { resolveBuilderModel, BUILDER_PRIMARY_MODEL } from './model'
 import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
-  type Project, type Message, type StoredAction, type MessagePart,
-  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter, renameProject, deleteProject,
+  type Project, type Message, type StoredAction, type MessagePart, type ProjectSettings,
+  createProject, getProject, listProjects, saveFiles, saveAssets, saveDeploy, addMessage, getMessages, deleteMessage, deleteMessagesAfter, renameProject, deleteProject, saveProjectSettings,
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
@@ -63,6 +64,7 @@ export function Builder() {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [fatal, setFatal] = useState('')
   const [showProjects, setShowProjects] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   const ws = useRef<Workspace | null>(null)
   const filesRef = useRef<Record<string, string>>({})
@@ -362,6 +364,13 @@ export function Builder() {
     if (project?.id === id) setProject((p) => (p ? { ...p, name: clean } : p))
   }
 
+  async function handleSaveSettings(settings: ProjectSettings) {
+    if (!project) return
+    await saveProjectSettings(project.id, settings)
+    setProject((p) => (p ? { ...p, settings } : p))
+    setProjects((ps) => ps.map((p) => (p.id === project.id ? { ...p, settings } : p)))
+  }
+
   async function handleDelete(id: string) {
     if (!confirm('Delete this app and its chat history? This cannot be undone.')) return
     await deleteProject(id)
@@ -394,6 +403,9 @@ export function Builder() {
         </button>
         <button onClick={newProject} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2" title="New app">
           <Plus className="size-3.5" /> New
+        </button>
+        <button onClick={() => project && setShowSettings(true)} disabled={!project} className="flex items-center gap-1 rounded-lg border px-2 py-1 text-xs hover:bg-surface-2 disabled:opacity-50" title="App settings">
+          <Settings className="size-3.5" /> Settings
         </button>
         <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
           <span className={`size-2 rounded-full ${status === 'ready' ? 'bg-signal' : status === 'error' ? 'bg-destructive' : 'bg-amber-400 animate-pulse'}`} />
@@ -555,6 +567,16 @@ export function Builder() {
           onNew={newProject}
           onRename={handleRename}
           onDelete={handleDelete}
+        />
+      )}
+
+      {showSettings && project && (
+        <SettingsModal
+          project={project}
+          onClose={() => setShowSettings(false)}
+          onSave={handleSaveSettings}
+          onRename={(n) => handleRename(project.id, n)}
+          onDelete={() => { setShowSettings(false); handleDelete(project.id) }}
         />
       )}
     </div>
