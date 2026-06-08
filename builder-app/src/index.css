@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* Self-contained design tokens (dark) — carbon-blue surfaces + electric-green
+   signal accent. No external font/shadcn deps; system fonts. */
+@theme inline {
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-signal: var(--signal);
+  --color-signal-foreground: var(--signal-foreground);
+  --color-signal-muted: var(--signal-muted);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+  --radius-2xl: calc(var(--radius) * 2);
+  --radius-3xl: calc(var(--radius) * 3);
+}
+
+:root, .dark {
+  --background: oklch(0.165 0.012 256);
+  --foreground: oklch(0.96 0.004 106);
+  --surface-1: oklch(0.195 0.013 256);
+  --surface-2: oklch(0.225 0.014 256);
+  --surface-3: oklch(0.265 0.015 256);
+  --card: oklch(0.195 0.013 256);
+  --card-foreground: oklch(0.96 0.004 106);
+  --popover: oklch(0.205 0.013 256);
+  --popover-foreground: oklch(0.96 0.004 106);
+  --primary: oklch(0.95 0.004 106);
+  --primary-foreground: oklch(0.18 0.012 256);
+  --secondary: oklch(0.255 0.014 256);
+  --secondary-foreground: oklch(0.96 0.004 106);
+  --muted: oklch(0.235 0.013 256);
+  --muted-foreground: oklch(0.68 0.012 256);
+  --accent: oklch(0.27 0.015 256);
+  --accent-foreground: oklch(0.97 0.004 106);
+  --destructive: oklch(0.66 0.2 22);
+  --signal: oklch(0.86 0.19 152);
+  --signal-foreground: oklch(0.2 0.06 160);
+  --signal-muted: oklch(0.86 0.19 152 / 0.14);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 12%);
+  --ring: oklch(0.86 0.19 152 / 0.6);
+  --radius: 0.625rem;
+}
+
+@layer base {
+  * { border-color: var(--border); }
+  html, body, #root { height: 100%; }
+  body { background: var(--background); color: var(--foreground); font-family: var(--font-sans); }
+}
+
+/* Inputs in the Settings screen. */
+.inp {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--input);
+  background: var(--background);
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
+}
+.inp:focus { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+/* Animated gradient text (wordmark sheen + the agent's "Working…" shimmer). */
+@layer utilities {
+  .sheen {
+    background: linear-gradient(100deg, var(--foreground) 0%, var(--signal) 35%, var(--foreground) 70%);
+    background-size: 200% auto;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: sheen 6s linear infinite;
+  }
+  .shimmer {
+    background: linear-gradient(100deg, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 30%, var(--foreground) 50%, color-mix(in oklab, var(--muted-foreground) 55%, transparent) 70%);
+    background-size: 200% auto;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: sheen 1.6s linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) { .sheen, .shimmer { animation: none !important; } }
+}
+@keyframes sheen { to { background-position: 200% center; } }
