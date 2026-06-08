@@ -67,6 +67,7 @@ export interface AgentRun {
   recentErrors?: string
   model: string
   fallbackModel: string | null
+  frameworkHint?: string
   exec: Executors
 }
 
@@ -98,7 +99,7 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
   return new Observable<AgentEvent>((sub) => {
     const ctrl = new AbortController()
     const convo: ChatMsg[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + (run.frameworkHint ? `\n\nACTIVE FRAMEWORK (overrides the default Vite+React assumptions above where they differ): ${run.frameworkHint}` : '') },
       { role: 'user', content: buildContextMessage({ files: run.files, recentErrors: run.recentErrors }) },
       ...run.history,
       { role: 'user', content: run.userPrompt },

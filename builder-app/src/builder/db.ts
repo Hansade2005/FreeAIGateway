@@ -27,6 +27,7 @@ export interface Project {
   files: Record<string, string>
   assets?: Record<string, Uint8Array> // generated binary assets (images)
   settings?: ProjectSettings
+  framework?: string // FrameworkId — which stack this project was scaffolded with
   leafId?: number | null // active conversation branch tip (last message shown)
   createdAt: number
   updatedAt: number
@@ -93,9 +94,9 @@ export const db = new BuilderDB()
 
 const uid = () => `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
 
-export async function createProject(name: string, files: Record<string, string>): Promise<Project> {
+export async function createProject(name: string, files: Record<string, string>, framework?: string): Promise<Project> {
   const now = Date.now()
-  const project: Project = { id: uid(), name, files, createdAt: now, updatedAt: now }
+  const project: Project = { id: uid(), name, files, framework, createdAt: now, updatedAt: now }
   await db.projects.put(project)
   return project
 }

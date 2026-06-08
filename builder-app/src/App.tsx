@@ -5,7 +5,7 @@ import { Home } from './Home'
 import { isConfigured } from './provider'
 import { setPending } from './pending'
 import { createProject } from './builder/db'
-import { STARTER_FILES } from './builder/template'
+import { getFramework } from './builder/frameworks'
 
 const LAST_KEY = 'fag-builder-last' // matches Builder's project key
 
@@ -28,8 +28,9 @@ export function App() {
     localStorage.setItem(LAST_KEY, id)
     setProjectId(id); setView('builder')
   }
-  const startFromPrompt = async (prompt: string) => {
-    const p = await createProject(deriveName(prompt), { ...STARTER_FILES })
+  const startFromPrompt = async (prompt: string, frameworkId: string) => {
+    const fw = getFramework(frameworkId)
+    const p = await createProject(deriveName(prompt), { ...fw.files }, fw.id)
     // Hand the prompt off via the pending store (reload-safe, no URL/props).
     setPending(p.id, { prompt })
     open(p.id)

@@ -155,15 +155,45 @@ export class Workspace {
     await this.install()
   }
 
-  /** Build for production and return the emitted dist/ files as bytes (text and
-   * binary alike) — ready to upload to a host. */
-  async build(): Promise<Record<string, Uint8Array>> {
+  /** Build for production and return the emitted static files. Auto-detects the
+   * output directory (frameworks differ: Vite=dist, CRA=build, Next export=out,
+   * Nuxt=.output/public, Angular=dist/<name>/browser) by finding the folder that
+   * actually contains an index.html. Returns the files keyed relative to that
+   * root, plus the detected dir. */
+  async build(candidates: string[] = ['dist', 'build', 'out', '.output/public']): Promise<{ dir: string; files: Record<string, Uint8Array> }> {
     if (!this.wc) throw new Error('workspace not started')
     const proc = await this.wc.spawn('npm', ['run', 'build'])
     this.pipe(proc)
     const code = await proc.exit
     if (code !== 0) throw new Error(`build failed (exit ${code})`)
-    return this.readDir('dist')
+    for (const c of candidates) {
+      const root = await this.findStaticRoot(c)
+      if (root) return { dir: root, files: await this.readDir(root) }
+    }
+    // No index.html found — return the first existing candidate as-is.
+    for (const c of candidates) {
+      if (await this.dirExists(c)) return { dir: c, files: await this.readDir(c) }
+    }
+    throw new Error(`build produced no output (looked in: ${candidates.join(', ')})`)
+  }
+
+  private async dirExists(dir: string): Promise<boolean> {
+    if (!this.wc) return false
+    try { await this.wc.fs.readdir(dir); return true } catch { return false }
+  }
+
+  // Find the folder containing index.html — `base`, or a subdir up to `depth`
+  // deep (handles Angular's dist/<name>/browser). Returns null if not found.
+  private async findStaticRoot(base: string, depth = 2): Promise<string | null> {
+    if (!this.wc) return null
+    let entries: any[]
+    try { entries = await this.wc.fs.readdir(base, { withFileTypes: true }) } catch { return null }
+    if (entries.some((e) => e.isFile() && e.name === 'index.html')) return base
+    if (depth <= 0) return null
+    for (const e of entries) {
+      if (e.isDirectory()) { const r = await this.findStaticRoot(`${base}/${e.name}`, depth - 1); if (r) return r }
+    }
+    return null
   }
 
   private async readDir(dir: string, base = dir): Promise<Record<string, Uint8Array>> {
