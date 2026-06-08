@@ -3,6 +3,8 @@ import type { Subscription } from 'rxjs'
 import { Sparkles, Send, Eye, Code2, Plus, ExternalLink, Square, RotateCw, RotateCcw, Rocket, Download, FileText, FileSearch, Trash2, Image as ImageIcon, Loader2, TerminalSquare, Copy, Check, Camera, ScrollText, ChevronDown, Palette, Pencil, X, LayoutGrid, FolderOpen, Settings, Globe, Search } from 'lucide-react'
 import { Workspace, type WCStatus } from './webcontainer'
 import { SettingsModal } from './SettingsModal'
+import { Markdown } from './Markdown'
+import { ColResizer } from './Resizer'
 import { runAgent } from './agent'
 import { generateImageBytes } from './gateway'
 import { CodeView } from './CodeView'
@@ -15,7 +17,16 @@ import {
 } from './db'
 
 const LAST_KEY = 'fag-builder-last'
+const CHATW_KEY = 'fag-builder-chatw'
 const DEFAULT_NAME = 'Untitled app'
+
+const PROMPT_IDEAS = [
+  'Build a landing page for a SaaS product — hero, features, pricing, and footer.',
+  'Make a pomodoro timer with a circular progress ring and a task list.',
+  'Create a kanban board with draggable cards across columns.',
+  'Design a personal portfolio with a projects grid and a contact form.',
+  'Build a weather dashboard with a search box and animated cards.',
+]
 
 // True for names the user never set themselves (so we can auto-name from the
 // first prompt without clobbering a name they chose).
@@ -65,6 +76,11 @@ export function Builder() {
   const [fatal, setFatal] = useState('')
   const [showProjects, setShowProjects] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showIdeas, setShowIdeas] = useState(false)
+  const [chatWidth, setChatWidth] = useState(() => {
+    const v = Number(localStorage.getItem(CHATW_KEY) || '')
+    return v >= 300 && v <= 760 ? v : 380
+  })
 
   const ws = useRef<Workspace | null>(null)
   const filesRef = useRef<Record<string, string>>({})
@@ -92,6 +108,7 @@ export function Builder() {
   }
 
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, running])
+  useEffect(() => { localStorage.setItem(CHATW_KEY, String(chatWidth)) }, [chatWidth])
 
   // Preview→builder channel: errors, console output, and replies to our DOM /
   // screenshot requests. Its OWN effect (not behind the boot guard) so React
@@ -301,6 +318,90 @@ export function Builder() {
 
   function stop() { sub.current?.unsubscribe(); setRunning(false) }
 
+  // File operations backing the explorer/editor context menus. Each mutates the
+  // in-memory maps, the running sandbox, and the persisted project together.
+  const joinPath = (dir: string, name: string) => (dir ? `${dir}/${name}` : name)
+  const parentOf = (p: string) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i) }
+  const matchingUnder = (path: string, keys: string[]) => keys.filter((k) => k === path || k.startsWith(path + '/'))
+
+  async function fsWriteFile(path: string, contents: string) {
+    if (!project) return
+    filesRef.current = { ...filesRef.current, [path]: contents }
+    setFiles(filesRef.current)
+    await ws.current?.writeFile(path, contents).catch(() => {})
+    await saveFiles(project.id, filesRef.current)
+  }
+
+  async function fsNewFile(dir: string) {
+    const name = prompt(`New file name${dir ? ` in ${dir}/` : ''}:`)?.trim()
+    if (!name) return
+    const path = joinPath(dir, name)
+    if (filesRef.current[path] != null || assetsRef.current[path]) { alert(`${path} already exists`); return }
+    await fsWriteFile(path, '')
+    setSelected(path); setDraft(null); setTab('code')
+  }
+
+  async function fsNewFolder(dir: string) {
+    const name = prompt('New folder name:')?.trim()
+    if (!name) return
+    await fsWriteFile(joinPath(joinPath(dir, name), '.gitkeep'), '')
+  }
+
+  async function fsRename(path: string) {
+    if (!project) return
+    const next = prompt('Rename / move to:', path)?.trim()
+    if (!next || next === path) return
+    const map = (p: string) => next + p.slice(path.length)
+    const nf = { ...filesRef.current }
+    for (const p of matchingUnder(path, Object.keys(filesRef.current))) {
+      const np = map(p); nf[np] = nf[p]; delete nf[p]
+      await ws.current?.deleteFile(p).catch(() => {}); await ws.current?.writeFile(np, filesRef.current[p]).catch(() => {})
+    }
+    const na = { ...assetsRef.current }
+    for (const p of matchingUnder(path, Object.keys(assetsRef.current))) {
+      const np = map(p); na[np] = na[p]; delete na[p]
+      await ws.current?.deleteFile(p).catch(() => {}); await ws.current?.writeBinary(np, assetsRef.current[p]).catch(() => {})
+    }
+    filesRef.current = nf; assetsRef.current = na; setFiles(nf)
+    await saveFiles(project.id, nf); await saveAssets(project.id, na)
+    if (selected === path || selected.startsWith(path + '/')) setSelected(map(selected))
+  }
+
+  async function fsRemove(path: string) {
+    if (!project) return
+    if (!confirm(`Delete ${path}? This cannot be undone.`)) return
+    const nf = { ...filesRef.current }; const na = { ...assetsRef.current }
+    for (const p of matchingUnder(path, Object.keys(filesRef.current))) { delete nf[p]; await ws.current?.deleteFile(p).catch(() => {}) }
+    for (const p of matchingUnder(path, Object.keys(assetsRef.current))) { delete na[p]; await ws.current?.deleteFile(p).catch(() => {}) }
+    filesRef.current = nf; assetsRef.current = na; setFiles(nf)
+    await saveFiles(project.id, nf); await saveAssets(project.id, na)
+    if (selected === path || selected.startsWith(path + '/')) { setSelected(Object.keys(nf)[0] ?? ''); setDraft(null) }
+  }
+
+  async function fsDuplicate(path: string) {
+    if (!project) return
+    const isFile = path in filesRef.current
+    const isAsset = path in assetsRef.current
+    if (!isFile && !isAsset) return
+    const dir = parentOf(path); const base = isFile || isAsset ? path.slice(dir ? dir.length + 1 : 0) : path
+    const dot = base.lastIndexOf('.')
+    const stem = dot > 0 ? base.slice(0, dot) : base
+    const ext = dot > 0 ? base.slice(dot) : ''
+    let n = 1, cand = ''
+    do { cand = joinPath(dir, `${stem}-copy${n > 1 ? n : ''}${ext}`); n++ } while (filesRef.current[cand] != null || assetsRef.current[cand])
+    if (isFile) { await fsWriteFile(cand, filesRef.current[path]); setSelected(cand) }
+    else {
+      assetsRef.current = { ...assetsRef.current, [cand]: assetsRef.current[path] }
+      await ws.current?.writeBinary(cand, assetsRef.current[path]).catch(() => {})
+      await saveAssets(project.id, assetsRef.current)
+    }
+  }
+
+  const fsOps = {
+    newFile: fsNewFile, newFolder: fsNewFolder, rename: fsRename, remove: fsRemove, duplicate: fsDuplicate,
+    copyPath: (p: string) => { navigator.clipboard.writeText(p).catch(() => {}) },
+  }
+
   async function copyMessage(text: string, i: number) {
     try { await navigator.clipboard.writeText(text) } catch { /* ignore */ }
     setCopiedIdx(i); setTimeout(() => setCopiedIdx((c) => (c === i ? null : c)), 1400)
@@ -445,7 +546,7 @@ export function Builder() {
       ) : (
         <div className="flex min-h-0 flex-1">
           {/* Chat */}
-          <div className="flex w-[380px] flex-none flex-col border-r">
+          <div style={{ width: chatWidth }} className="flex flex-none flex-col border-r">
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
               {messages.length === 0 && (
                 <div className="rounded-xl border bg-surface-1 p-4 text-sm text-muted-foreground">
@@ -469,7 +570,7 @@ export function Builder() {
                       // Inline timeline: text and tool pills in the exact order they happened.
                       <div className="flex flex-col gap-1.5">
                         {m.parts.map((part, k) => part.type === 'text'
-                          ? (cleanText(part.text) ? <div key={k} className="whitespace-pre-wrap break-words">{cleanText(part.text)}</div> : null)
+                          ? (cleanText(part.text) ? <Markdown key={k}>{cleanText(part.text)}</Markdown> : null)
                           : <ActionPill key={k} action={part.action} onOpen={openInCode} />)}
                         {empty && running && isLast && !showWriting && <div className="text-muted-foreground">Thinking…</div>}
                         {showWriting && (
@@ -481,7 +582,7 @@ export function Builder() {
                     ) : (
                       // Legacy messages (pre-timeline): prose then grouped pills.
                       <>
-                        <div className="whitespace-pre-wrap break-words">{cleanText(m.content)}</div>
+                        <Markdown>{cleanText(m.content)}</Markdown>
                         {actions.length > 0 && (
                           <div className="mt-2 flex flex-col gap-1">
                             {actions.map((a, j) => <ActionPill key={j} action={a} onOpen={openInCode} />)}
@@ -513,27 +614,56 @@ export function Builder() {
               </div>
             )}
 
-            <div className="border-t p-3">
-              <div className="flex items-end gap-2">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
-                  placeholder={status === 'ready' ? 'Describe a change…' : 'Starting the sandbox…'}
-                  rows={1}
-                  disabled={status !== 'ready'}
-                  className="max-h-[140px] min-h-[40px] flex-1 resize-none rounded-lg border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/40 disabled:opacity-50"
-                />
-                {running ? (
-                  <button onClick={stop} className="flex items-center gap-1 rounded-lg bg-surface-2 px-3 py-2 text-sm font-medium"><Square className="size-3.5" /> Stop</button>
-                ) : (
-                  <button onClick={() => send(input)} disabled={!input.trim() || status !== 'ready'} className="flex items-center gap-1 rounded-lg bg-signal px-3 py-2 text-sm font-semibold text-signal-foreground disabled:opacity-50">
-                    <Send className="size-4" /> Build
-                  </button>
+            <div className="p-3">
+              <div className="relative">
+                {showIdeas && (
+                  <div className="absolute bottom-full left-0 z-10 mb-2 w-full overflow-hidden rounded-xl border bg-surface-1 shadow-lg">
+                    <div className="px-3 py-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Prompt ideas</div>
+                    {PROMPT_IDEAS.map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => { setInput(p); setShowIdeas(false) }}
+                        className="block w-full border-t px-3 py-2 text-left text-xs text-muted-foreground hover:bg-surface-2 hover:text-foreground"
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
                 )}
+                <div className="rounded-2xl border bg-surface-1 transition focus-within:border-signal/50 focus-within:ring-2 focus-within:ring-signal/25">
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
+                    placeholder={status === 'ready' ? 'Write a message…' : 'Starting the sandbox…'}
+                    rows={1}
+                    disabled={status !== 'ready'}
+                    className="max-h-[180px] min-h-[48px] w-full resize-none bg-transparent px-4 pt-3 text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
+                  />
+                  <div className="flex items-center gap-2 px-2.5 pb-2.5">
+                    <button
+                      onClick={() => setShowIdeas((s) => !s)}
+                      title="Prompt ideas"
+                      className={`grid size-8 place-items-center rounded-full border transition hover:bg-surface-2 ${showIdeas ? 'border-signal/50 text-signal' : 'text-muted-foreground'}`}
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                    <div className="ml-auto flex items-center gap-1.5">
+                      {running ? (
+                        <button onClick={stop} title="Stop" className="grid size-8 place-items-center rounded-full bg-surface-2 text-foreground hover:opacity-90"><Square className="size-3.5" /></button>
+                      ) : (
+                        <button onClick={() => send(input)} disabled={!input.trim() || status !== 'ready'} title="Send" className="grid size-8 place-items-center rounded-full bg-signal text-signal-foreground transition hover:opacity-90 disabled:opacity-40">
+                          <Send className="size-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+
+          <ColResizer onDelta={(dx) => setChatWidth((w) => Math.min(760, Math.max(300, w + dx)))} />
 
           {/* Preview | Code */}
           <div className="flex min-w-0 flex-1 flex-col">
@@ -566,6 +696,7 @@ export function Builder() {
                   draft={draft}
                   onChangeDraft={setDraft}
                   onSave={saveDraft}
+                  fs={fsOps}
                 />
               )}
             </div>
