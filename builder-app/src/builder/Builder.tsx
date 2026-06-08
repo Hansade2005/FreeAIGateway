@@ -11,6 +11,7 @@ import { CodeView } from './CodeView'
 import { resolveBuilderModel } from './model'
 import { getProvider } from '../provider'
 import { takePending } from '../pending'
+import { getFramework } from './frameworks'
 import { STARTER_FILES, ensureBridge } from './template'
 import { downloadZip } from './zip'
 import {
@@ -351,6 +352,7 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
       recentErrors,
       model,
       fallbackModel: getProvider()?.fallbackModel?.trim() || null,
+      frameworkHint: getFramework(project.framework).hint,
       exec: {
         writeFile: async (path, c) => {
           filesRef.current = { ...filesRef.current, [path]: c }
@@ -600,13 +602,21 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
     setDraft(null)
   }
 
-  // Build in the sandbox, hand the dist off via IndexedDB, and open the
-  // (non-isolated) /deploy page where Puter auth + upload happen.
+  // Deploy. Static frameworks → build, auto-detect the output dir, hand off via
+  // IndexedDB, and open the (non-isolated) /deploy page for Puter. Node/SSR
+  // frameworks (Express, etc.) → export the source ZIP and point at Vercel/Netlify.
   async function deploy() {
     if (!project || running || status !== 'ready') return
+    const fw = getFramework(project.framework)
+    if (fw.deploy === 'node') {
+      downloadZip(project.name, files, assetsRef.current)
+      window.open('https://vercel.com/new', '_blank', 'noopener')
+      setErrors((p) => (p + `\nThis is a ${fw.label} (server) app — Puter only hosts static sites. Downloaded ${project.name}.zip; push it to GitHub and import at Vercel or Netlify.`).slice(-3000))
+      return
+    }
     try {
       setStatus('installing')
-      const dist = await ws.current!.build()
+      const { files: dist } = await ws.current!.build(fw.buildDirs.length ? fw.buildDirs : undefined)
       const id = await saveDeploy(project.name, dist)
       setStatus('ready')
       window.open(`/deploy?id=${id}`, '_blank', 'noopener')

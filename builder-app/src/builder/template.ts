@@ -211,6 +211,11 @@ export const PREVIEW_BRIDGE = `<script>
   })();
 </script>`
 
+// The bridge JS without the <script> wrapper — for frameworks that inject head
+// scripts programmatically (Next.js layout, Nuxt config) rather than via a
+// static index.html.
+export const BRIDGE_BODY = PREVIEW_BRIDGE.replace(/^<script>\s*/, '').replace(/\s*<\/script>$/, '')
+
 // Marker baked into the current bridge so we can tell whether a project already
 // has the latest version (and skip rewriting it).
 const BRIDGE_MARKER = 'fag-bridge:6'

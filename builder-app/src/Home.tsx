@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles, ArrowUp, Plus, Mic, FolderOpen } from 'lucide-react'
 import { listProjects, type Project } from './builder/db'
+import { FRAMEWORK_LIST } from './builder/frameworks'
 import { getDailySuggestions, FALLBACK_SUGGESTIONS } from './a0'
 
 function timeAgo(t: number): string {
@@ -17,11 +18,12 @@ function gradientFor(id: string): string {
 }
 
 export function Home({ onStart, onOpen, onEditProvider }: {
-  onStart: (prompt: string) => void
+  onStart: (prompt: string, framework: string) => void
   onOpen: (id: string) => void
   onEditProvider?: () => void
 }) {
   const [prompt, setPrompt] = useState('')
+  const [framework, setFramework] = useState('react')
   const [projects, setProjects] = useState<Project[]>([])
   const [suggestions, setSuggestions] = useState<string[]>(FALLBACK_SUGGESTIONS)
   const [listening, setListening] = useState(false)
@@ -31,7 +33,7 @@ export function Home({ onStart, onOpen, onEditProvider }: {
   useEffect(() => { let ok = true; getDailySuggestions().then((s) => { if (ok && s.length) setSuggestions(s) }).catch(() => {}); return () => { ok = false } }, [])
   useEffect(() => () => { try { recRef.current?.stop() } catch { /* ignore */ } }, [])
 
-  const submit = () => { const v = prompt.trim(); if (v) onStart(v) }
+  const submit = () => { const v = prompt.trim(); if (v) onStart(v, framework) }
 
   const voice = () => {
     const W = window as any
@@ -80,7 +82,17 @@ export function Home({ onStart, onOpen, onEditProvider }: {
                 className="w-full resize-none bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none"
               />
               <div className="flex items-center justify-between px-1">
-                <button type="button" aria-label="Attach" className="grid size-9 place-items-center rounded-lg text-muted-foreground/50" title="Attachments coming soon"><Plus size={18} /></button>
+                <div className="flex items-center gap-1">
+                  <button type="button" aria-label="Attach" className="grid size-9 place-items-center rounded-lg text-muted-foreground/50" title="Attachments coming soon"><Plus size={18} /></button>
+                  <select
+                    value={framework}
+                    onChange={(e) => setFramework(e.target.value)}
+                    title="Framework"
+                    className="rounded-lg border bg-surface-1 px-2 py-1.5 text-xs text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-signal/30"
+                  >
+                    {FRAMEWORK_LIST.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                  </select>
+                </div>
                 <div className="flex items-center gap-1">
                   <button type="button" onClick={voice} aria-label="Voice" className={`grid size-9 place-items-center rounded-lg ${listening ? 'text-destructive' : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground'}`}>
                     <Mic size={18} />
