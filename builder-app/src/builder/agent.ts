@@ -110,6 +110,16 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
       ? BUILDER_TOOLS
       : BUILDER_TOOLS.filter((t) => t.function.name !== 'generate_image')
 
+    // Weak/free models often stall: they narrate ("I'll create the files…"),
+    // sometimes even writing a tool call as TEXT, then end the turn with no real
+    // tool call — which would otherwise look "done". If nothing has been written
+    // yet, nudge the model to actually act, a bounded number of times, instead of
+    // making the user type "continue".
+    let wroteAnything = false
+    let autoContinues = 0
+    const MAX_AUTO_CONTINUE = 5
+    const WRITE_TOOLS = new Set(['write_file', 'edit_file', 'generate_image', 'delete_file'])
+
     ;(async () => {
       try {
         for (let step = 0; step < MAX_STEPS; step++) {
@@ -137,10 +147,22 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
             },
           })
 
-          if (toolCalls.length === 0) { sub.next({ type: 'done', model }); sub.complete(); return }
+          if (toolCalls.length === 0) {
+            // No real tool call this turn. If the model hasn't actually written
+            // anything yet, it's almost certainly stalling on narration — push it
+            // to act instead of treating the task as complete.
+            if (!wroteAnything && autoContinues < MAX_AUTO_CONTINUE) {
+              autoContinues++
+              convo.push({ role: 'assistant', content: text })
+              convo.push({ role: 'user', content: 'Stop describing and ACT now. Emit real tool calls (write_file / edit_file) to create the files — never write a tool call as text like "[Called write_file]". Don\'t re-call frontend_design or list_files; build the app. Keep going until it works.' })
+              continue
+            }
+            sub.next({ type: 'done', model }); sub.complete(); return
+          }
 
           convo.push({ role: 'assistant', content: text, tool_calls: toolCalls })
           for (const call of toolCalls) {
+            if (WRITE_TOOLS.has(call.function.name)) wroteAnything = true
             const result = await execute(call, run.exec, sub)
             convo.push({ role: 'tool', tool_call_id: call.id, content: result.content })
             // A screenshot is threaded back as a vision message so vision-capable
