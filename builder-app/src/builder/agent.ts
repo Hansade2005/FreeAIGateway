@@ -77,9 +77,17 @@ export interface AgentRun {
 const MAX_STEPS = 60
 const norm = (p: string) => p.trim().replace(/^\.?\//, '')
 
-// Image (screenshot) turns go to the configured vision model when set, else the
-// primary model — not every provider/model accepts images, so this is opt-in.
-const visionModel = (fallback: string) => getProvider()?.visionModel?.trim() || fallback
+// A known-good free vision model on the default (the3rdacademy / Kilo) proxy.
+// Used for image turns when the provider config doesn't name its own vision
+// model — falling back to the primary model is wrong because auto-routers like
+// `kilo-auto/free` may pick a text-only model (e.g. gpt-oss-120b) that 404s on
+// image input ("No endpoints found that support image input").
+const DEFAULT_VISION_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
+
+// Image (screenshot) turns go to the configured vision model when set, else a
+// known image-capable model — never the bare primary model, since not every
+// model/router accepts images.
+const visionModel = () => getProvider()?.visionModel?.trim() || DEFAULT_VISION_MODEL
 const convoHasImage = (msgs: ChatMsg[]) =>
   msgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
 
@@ -128,10 +136,13 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
           let lastWriting = ''
           // Route image-bearing turns to the configured vision model; plain turns
           // stay on the primary model.
-          const turnModel = convoHasImage(convo) ? visionModel(run.model) : run.model
+          const imageTurn = convoHasImage(convo)
+          const turnModel = imageTurn ? visionModel() : run.model
           const { text, toolCalls, model } = await streamChat(convo, {
             model: turnModel,
-            fallbackModel: run.fallbackModel,
+            // Don't fall back to the (possibly text-only) primary/fallback model
+            // on an image turn — that's what 404s on image input.
+            fallbackModel: imageTurn ? null : run.fallbackModel,
             tools,
             signal: ctrl.signal,
             onToken: (delta) => sub.next({ type: 'delta', delta }),
