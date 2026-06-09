@@ -97,6 +97,22 @@ const visionModel = (primary: string) =>
 const convoHasImage = (msgs: ChatMsg[]) =>
   msgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
 
+// A truncated/garbled generation (common on free models) can leave a tool call
+// whose `arguments` is invalid JSON — e.g. an unterminated string when the
+// stream is cut mid-write. Threading that back verbatim makes the NEXT request
+// fail at the upstream's prefill ("Unterminated string starting at …", 400),
+// aborting the whole run. Re-serialize every tool call's arguments to valid
+// JSON (best effort) before pushing the assistant turn back into the convo, so
+// a single bad generation degrades to a retryable tool error instead of a fatal
+// request-parse error.
+function sanitizeToolCalls(calls: ToolCall[]): ToolCall[] {
+  return calls.map((c) => {
+    let obj: any = {}
+    try { obj = JSON.parse(c.function.arguments || '{}') } catch { obj = {} }
+    return { ...c, function: { ...c.function, arguments: JSON.stringify(obj) } }
+  })
+}
+
 // Format an interaction result (click/fill/press_key/scroll) into text the model
 // can act on: the confirmation + scroll position + the FRESH page snapshot (with
 // refs) so it sees the effect and can continue interacting by ref.
@@ -176,8 +192,11 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
             sub.next({ type: 'done', model }); sub.complete(); return
           }
 
-          convo.push({ role: 'assistant', content: text, tool_calls: toolCalls })
-          for (const call of toolCalls) {
+          // Normalize args to valid JSON before they re-enter the conversation —
+          // a truncated tool call would otherwise poison the next request.
+          const safeCalls = sanitizeToolCalls(toolCalls)
+          convo.push({ role: 'assistant', content: text, tool_calls: safeCalls })
+          for (const call of safeCalls) {
             if (WRITE_TOOLS.has(call.function.name)) wroteAnything = true
             const result = await execute(call, run.exec, sub)
             convo.push({ role: 'tool', tool_call_id: call.id, content: result.content })
