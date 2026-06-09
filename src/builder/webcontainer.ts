@@ -1,0 +1,210 @@
+import { WebContainer } from '@webcontainer/api'
+import { toFileSystemTree } from './template'
+
+// Thin lifecycle wrapper around a single WebContainer instance: boot → mount →
+// install → dev server, plus incremental file writes (Vite HMR picks them up,
+// no restart) and dev-server output capture for the error-feedback loop.
+
+// Tools like npm print spinners and colors using ANSI escapes + carriage-return
+// overwrites. Raw, that's an unreadable mess of "\x1b[1G\x1b[0K-\|/" for the
+// agent and the chat pill. Strip the escapes and collapse each line's CR
+// overwrites to its final state, then drop spinner-only/blank lines.
+export function cleanTerminalOutput(raw: string): string {
+  let s = raw
+    .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, '') // OSC (e.g. window title)
+    .replace(/\x1B\[[0-9]*G/g, '\r')                    // cursor-to-column → line reset
+    .replace(/\x1B\[[0-2]?K/g, '')                      // erase-in-line
+    .replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, '')          // remaining CSI (colors, cursor moves)
+    .replace(/\x1B[@-Z\\-_]/g, '')                      // lone escapes
+    .replace(/\r\n/g, '\n')
+  const lines = s.split('\n').map((line) => {
+    const segs = line.split('\r')
+    return segs[segs.length - 1].replace(/\s+$/, '')
+  })
+  return lines
+    .filter((l) => l.trim() !== '' && !/^[-\\|/]+$/.test(l.trim()))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+export type WCStatus = 'idle' | 'booting' | 'installing' | 'starting' | 'ready' | 'error'
+
+export interface WCCallbacks {
+  onStatus?: (s: WCStatus) => void
+  onOutput?: (chunk: string) => void   // raw dev-server / install output
+  onServerReady?: (url: string) => void
+}
+
+let instance: WebContainer | null = null
+let bootPromise: Promise<WebContainer> | null = null
+
+// WebContainer allows only one instance per page.
+async function getContainer(): Promise<WebContainer> {
+  if (instance) return instance
+  if (!bootPromise) bootPromise = WebContainer.boot({ coep: 'credentialless' })
+  instance = await bootPromise
+  return instance
+}
+
+export class Workspace {
+  private wc: WebContainer | null = null
+  private devProc: Awaited<ReturnType<WebContainer['spawn']>> | null = null
+  private cb: WCCallbacks
+  status: WCStatus = 'idle'
+  previewUrl = ''
+
+  constructor(cb: WCCallbacks = {}) { this.cb = cb }
+
+  private setStatus(s: WCStatus) { this.status = s; this.cb.onStatus?.(s) }
+
+  /** Boot, mount the given files, npm install, and start the dev server. */
+  async start(files: Record<string, string>): Promise<void> {
+    if (!self.crossOriginIsolated) throw new Error('Not cross-origin isolated — WebContainer cannot boot on this page.')
+    this.setStatus('booting')
+    this.wc = await getContainer()
+    this.wc.on('server-ready', (_port, url) => {
+      this.previewUrl = url
+      this.setStatus('ready')
+      this.cb.onServerReady?.(url)
+    })
+    await this.wc.mount(toFileSystemTree(files))
+    await this.install()
+    await this.runDev()
+  }
+
+  /** Kept for API compatibility; node_modules snapshotting was removed. */
+  async recacheDeps(): Promise<void> { /* no-op */ }
+
+  private pipe(proc: Awaited<ReturnType<WebContainer['spawn']>>) {
+    proc.output.pipeTo(new WritableStream({ write: (d) => this.cb.onOutput?.(d) }))
+  }
+
+  private async install(): Promise<void> {
+    if (!this.wc) return
+    this.setStatus('installing')
+    // --no-audit/--no-fund skip extra network round-trips; --prefer-offline reuses
+    // any cached tarballs. The template ships a lockfile so resolution is skipped.
+    const proc = await this.wc.spawn('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline'])
+    this.pipe(proc)
+    const code = await proc.exit
+    if (code !== 0) { this.setStatus('error'); throw new Error(`npm install failed (exit ${code})`) }
+  }
+
+  private async runDev(): Promise<void> {
+    if (!this.wc) return
+    this.setStatus('starting')
+    this.devProc = await this.wc.spawn('npm', ['run', 'dev'])
+    this.pipe(this.devProc)
+    // server-ready fires via the `on` handler set in start().
+  }
+
+  /** Write/overwrite a single file; creates parent dirs as needed. Vite HMRs. */
+  async writeFile(path: string, contents: string): Promise<void> {
+    if (!this.wc) return
+    const dir = path.split('/').slice(0, -1).join('/')
+    if (dir) await this.wc.fs.mkdir(dir, { recursive: true }).catch(() => {})
+    await this.wc.fs.writeFile(path, contents)
+  }
+
+  async writeFiles(files: Record<string, string>): Promise<void> {
+    for (const [path, contents] of Object.entries(files)) await this.writeFile(path, contents)
+  }
+
+  /** Read a text file from the sandbox (null if missing). */
+  async readFile(path: string): Promise<string | null> {
+    if (!this.wc) return null
+    try { return await this.wc.fs.readFile(path, 'utf-8') } catch { return null }
+  }
+
+  /** Delete a file from the sandbox. */
+  async deleteFile(path: string): Promise<void> {
+    if (!this.wc) return
+    await this.wc.fs.rm(path, { force: true }).catch(() => {})
+  }
+
+  /** Write a binary asset (e.g. a generated image) into the project. */
+  async writeBinary(path: string, data: Uint8Array): Promise<void> {
+    if (!this.wc) return
+    const dir = path.split('/').slice(0, -1).join('/')
+    if (dir) await this.wc.fs.mkdir(dir, { recursive: true }).catch(() => {})
+    await this.wc.fs.writeFile(path, data)
+  }
+
+  /** Run an arbitrary command in the sandbox (for the agent's run_command tool),
+   * capturing combined output and exit code. */
+  async exec(command: string): Promise<{ output: string; exitCode: number }> {
+    if (!this.wc) throw new Error('workspace not started')
+    const parts = command.trim().split(/\s+/)
+    const proc = await this.wc.spawn(parts[0], parts.slice(1))
+    let output = ''
+    proc.output.pipeTo(new WritableStream({ write: (d) => { output += d; this.cb.onOutput?.(d) } }))
+    const exitCode = await proc.exit
+    return { output: cleanTerminalOutput(output).slice(-4000), exitCode }
+  }
+
+  /** Spawn an interactive shell (jsh) sized to a terminal, for the xterm panel.
+   * Returns the raw process so the UI can wire output→xterm and xterm→input. */
+  async startShell(cols: number, rows: number): Promise<Awaited<ReturnType<WebContainer['spawn']>>> {
+    if (!this.wc) throw new Error('workspace not started')
+    return this.wc.spawn('jsh', [], { terminal: { cols, rows } })
+  }
+
+  /** Re-install (used when package.json changed) then the dev server picks up deps. */
+  async reinstall(): Promise<void> {
+    await this.install()
+  }
+
+  /** Build for production and return the emitted static files. Auto-detects the
+   * output directory (frameworks differ: Vite=dist, CRA=build, Next export=out,
+   * Nuxt=.output/public, Angular=dist/<name>/browser) by finding the folder that
+   * actually contains an index.html. Returns the files keyed relative to that
+   * root, plus the detected dir. */
+  async build(candidates: string[] = ['dist', 'build', 'out', '.output/public']): Promise<{ dir: string; files: Record<string, Uint8Array> }> {
+    if (!this.wc) throw new Error('workspace not started')
+    const proc = await this.wc.spawn('npm', ['run', 'build'])
+    this.pipe(proc)
+    const code = await proc.exit
+    if (code !== 0) throw new Error(`build failed (exit ${code})`)
+    for (const c of candidates) {
+      const root = await this.findStaticRoot(c)
+      if (root) return { dir: root, files: await this.readDir(root) }
+    }
+    // No index.html found — return the first existing candidate as-is.
+    for (const c of candidates) {
+      if (await this.dirExists(c)) return { dir: c, files: await this.readDir(c) }
+    }
+    throw new Error(`build produced no output (looked in: ${candidates.join(', ')})`)
+  }
+
+  private async dirExists(dir: string): Promise<boolean> {
+    if (!this.wc) return false
+    try { await this.wc.fs.readdir(dir); return true } catch { return false }
+  }
+
+  // Find the folder containing index.html — `base`, or a subdir up to `depth`
+  // deep (handles Angular's dist/<name>/browser). Returns null if not found.
+  private async findStaticRoot(base: string, depth = 2): Promise<string | null> {
+    if (!this.wc) return null
+    let entries: any[]
+    try { entries = await this.wc.fs.readdir(base, { withFileTypes: true }) } catch { return null }
+    if (entries.some((e) => e.isFile() && e.name === 'index.html')) return base
+    if (depth <= 0) return null
+    for (const e of entries) {
+      if (e.isDirectory()) { const r = await this.findStaticRoot(`${base}/${e.name}`, depth - 1); if (r) return r }
+    }
+    return null
+  }
+
+  private async readDir(dir: string, base = dir): Promise<Record<string, Uint8Array>> {
+    if (!this.wc) return {}
+    const out: Record<string, Uint8Array> = {}
+    const entries = await this.wc.fs.readdir(dir, { withFileTypes: true })
+    for (const e of entries) {
+      const full = `${dir}/${e.name}`
+      if (e.isDirectory()) Object.assign(out, await this.readDir(full, base))
+      else out[full.slice(base.length + 1)] = await this.wc.fs.readFile(full)
+    }
+    return out
+  }
+}
