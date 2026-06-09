@@ -1,5 +1,5 @@
 import '../index.css'
-import { getDeploy } from './db'
+import { getDeploy, getProject, saveDeployedSubdomain } from './db'
 
 // The /deploy page. NOT cross-origin isolated, so Puter's popup auth works here.
 // It reads the built dist/ (handed off via IndexedDB by the isolated builder)
@@ -45,10 +45,13 @@ async function main() {
   if (!rec) { render(card(`<p>${muted('That build wasn’t found (it may have expired). Re-run Deploy from the Builder.')}</p>`)); return }
 
   const fileCount = Object.keys(rec.files).length
+  // If this project was already published, re-deploy UPDATES that same site.
+  const proj = rec.projectId ? await getProject(rec.projectId) : undefined
+  const existingSub: string | undefined = proj?.deployedSubdomain
   render(card(`
-    <p style="font-size:14px">Publish <b>${escapeHtml(rec.name)}</b> — ${fileCount} files — to a free Puter subdomain.</p>
+    <p style="font-size:14px">${existingSub ? 'Update' : 'Publish'} <b>${escapeHtml(rec.name)}</b> — ${fileCount} files${existingSub ? ` — on <b>${escapeHtml(existingSub)}.puter.site</b>` : ' — to a free Puter subdomain'}.</p>
     <p style="font-size:12px;margin-top:6px">${muted('You’ll sign in to Puter (a popup) the first time. The app is hosted under your Puter account.')}</p>
-    ${btn('go', 'Sign in to Puter & deploy')}
+    ${btn('go', existingSub ? 'Sign in to Puter & update' : 'Sign in to Puter & deploy')}
     <p id="status" style="font-size:12.5px;margin-top:14px;min-height:18px"></p>
     <div id="result"></div>
   `))
@@ -62,7 +65,8 @@ async function main() {
       const p = await waitForPuter()
       if (!p.auth.isSignedIn()) { status('Waiting for sign-in…'); await p.auth.signIn() }
 
-      const dir = `app-${rec.id}`
+      // Stable per-project dir so re-deploys overwrite the same files in place.
+      const dir = `app-${rec.projectId || rec.id}`
       status('Uploading files…')
       try { await p.fs.mkdir(dir) } catch { /* exists */ }
       let done = 0
@@ -74,15 +78,26 @@ async function main() {
         status(`Uploading files… ${++done}/${fileCount}`)
       }
 
-      status('Creating site…')
-      const base = sanitize(rec.name)
-      const candidates = [base, `${base}-${rand(4)}`, `app-${rand(6)}`]
       let site: any = null
-      let lastErr = ''
-      for (const sub of candidates) {
-        try { site = await p.hosting.create(sub, dir); break } catch (e: any) { lastErr = e?.message ?? String(e) }
+      // Update the existing site if we have one; otherwise create a fresh subdomain.
+      if (existingSub) {
+        status('Updating site…')
+        try { site = await p.hosting.update(existingSub, dir) } catch { site = null }
+        if (!site) { try { site = await p.hosting.create(existingSub, dir) } catch { /* taken/gone → fall through */ } }
+        if (site && !site.subdomain) site = { subdomain: existingSub }
       }
-      if (!site) throw new Error(`Could not create a subdomain (${lastErr})`)
+      if (!site) {
+        status('Creating site…')
+        const base = sanitize(rec.name)
+        const candidates = [base, `${base}-${rand(4)}`, `app-${rand(6)}`]
+        let lastErr = ''
+        for (const sub of candidates) {
+          try { site = await p.hosting.create(sub, dir); break } catch (e: any) { lastErr = e?.message ?? String(e) }
+        }
+        if (!site) throw new Error(`Could not create a subdomain (${lastErr})`)
+      }
+      // Remember the subdomain on the project so the next deploy updates it.
+      if (rec.projectId && site?.subdomain) { try { await saveDeployedSubdomain(rec.projectId, site.subdomain) } catch { /* ignore */ } }
 
       const url = `https://${site.subdomain}.puter.site`
       status('')

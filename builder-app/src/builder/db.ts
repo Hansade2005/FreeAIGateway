@@ -28,6 +28,7 @@ export interface Project {
   assets?: Record<string, Uint8Array> // generated binary assets (images)
   settings?: ProjectSettings
   framework?: string // FrameworkId — which stack this project was scaffolded with
+  deployedSubdomain?: string // the Puter subdomain this project was published to (re-deploys update it)
   leafId?: number | null // active conversation branch tip (last message shown)
   createdAt: number
   updatedAt: number
@@ -65,6 +66,7 @@ export interface Message {
 export interface Deploy {
   id: string
   name: string
+  projectId?: string // so the deploy page can update that project's existing site
   files: Record<string, Uint8Array>
   createdAt: number
 }
@@ -163,13 +165,19 @@ export async function deleteMessagesAfter(projectId: string, createdAt: number):
   await db.messages.where('projectId').equals(projectId).and((m) => m.createdAt > createdAt).delete()
 }
 
-export async function saveDeploy(name: string, files: Record<string, Uint8Array>): Promise<string> {
+export async function saveDeploy(name: string, files: Record<string, Uint8Array>, projectId?: string): Promise<string> {
   const id = `d_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`
-  await db.deploys.put({ id, name, files, createdAt: Date.now() })
+  await db.deploys.put({ id, name, projectId, files, createdAt: Date.now() })
   // Keep the store tidy — drop handoffs older than an hour.
   const cutoff = Date.now() - 3600_000
   await db.deploys.where('createdAt').below(cutoff).delete().catch(() => {})
   return id
+}
+
+// Remember the Puter subdomain a project was published to, so re-deploys update
+// the same site instead of creating a new one.
+export async function saveDeployedSubdomain(projectId: string, subdomain: string): Promise<void> {
+  await db.projects.update(projectId, { deployedSubdomain: subdomain })
 }
 
 export async function getDeploy(id: string): Promise<Deploy | undefined> {
