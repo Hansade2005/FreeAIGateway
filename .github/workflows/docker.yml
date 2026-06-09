@@ -12,7 +12,9 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/freeaigateway
+  # Must be all-lowercase: GHCR rejects refs with uppercase (the owner login is
+  # `Hansade2005`). Hardcoded lowercase rather than ${{ github.repository_owner }}.
+  IMAGE: ghcr.io/hansade2005/freeaigateway
 
 # Each platform builds NATIVELY (ubuntu-24.04-arm is free for public repos) —
 # no QEMU. Emulated arm64 builds took ~20 min cold (better-sqlite3 compiles

@@ -78,16 +78,22 @@ const MAX_STEPS = 60
 const norm = (p: string) => p.trim().replace(/^\.?\//, '')
 
 // A known-good free vision model on the default (the3rdacademy / Kilo) proxy.
-// Used for image turns when the provider config doesn't name its own vision
-// model — falling back to the primary model is wrong because auto-routers like
-// `kilo-auto/free` may pick a text-only model (e.g. gpt-oss-120b) that 404s on
-// image input ("No endpoints found that support image input").
+// Used for image turns when the provider config names no vision model AND the
+// primary model is an auto-router (which may pick a text-only model that 404s on
+// image input — "No endpoints found that support image input").
 const DEFAULT_VISION_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'
 
-// Image (screenshot) turns go to the configured vision model when set, else a
-// known image-capable model — never the bare primary model, since not every
-// model/router accepts images.
-const visionModel = () => getProvider()?.visionModel?.trim() || DEFAULT_VISION_MODEL
+// Auto-routers (e.g. `kilo-auto/free`) pick the model per request, so an image
+// turn can land on a text-only model. Named models on real providers (gpt-4o,
+// claude-3-5-sonnet, openai/gpt-4o-mini) are usually vision-capable already.
+const isAutoRouter = (m: string) => /kilo|auto/i.test(m)
+
+// Image (screenshot) turns go to the configured vision model when set; else the
+// primary model if it's a concrete (likely vision-capable) model; else — for an
+// auto-router — a known image-capable model. Never blindly the auto-router,
+// since it may route images to a text-only model.
+const visionModel = (primary: string) =>
+  getProvider()?.visionModel?.trim() || (isAutoRouter(primary) ? DEFAULT_VISION_MODEL : primary)
 const convoHasImage = (msgs: ChatMsg[]) =>
   msgs.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'))
 
@@ -137,7 +143,7 @@ export function runAgent(run: AgentRun): Observable<AgentEvent> {
           // Route image-bearing turns to the configured vision model; plain turns
           // stay on the primary model.
           const imageTurn = convoHasImage(convo)
-          const turnModel = imageTurn ? visionModel() : run.model
+          const turnModel = imageTurn ? visionModel(run.model) : run.model
           const { text, toolCalls, model } = await streamChat(convo, {
             model: turnModel,
             // Don't fall back to the (possibly text-only) primary/fallback model

@@ -38,8 +38,15 @@ const btn = (id: string, label: string) =>
 const muted = (t: string) => `<span style="color:var(--muted-foreground)">${t}</span>`
 
 async function main() {
-  const id = new URLSearchParams(location.search).get('id')
-  if (!id) { render(card(`<p>${muted('No deploy in progress. Open this from the Builder’s Deploy button.')}</p>`)); return }
+  const params = new URLSearchParams(location.search)
+  const id = params.get('id')
+  if (!id) {
+    // The Builder opens this tab synchronously (so it isn't popup-blocked) with
+    // ?building=true while the production build runs, then redirects here with
+    // ?id=… once it's ready. Show a friendly "building" state meanwhile.
+    if (params.get('building')) { render(card(`<p style="font-size:14px">Building your app…</p><p style="font-size:12.5px;margin-top:8px">${muted('This tab will update automatically when the build is ready to deploy.')}</p>`)); return }
+    render(card(`<p>${muted('No deploy in progress. Open this from the Builder’s Deploy button.')}</p>`)); return
+  }
 
   const rec = await getDeploy(id)
   if (!rec) { render(card(`<p>${muted('That build wasn’t found (it may have expired). Re-run Deploy from the Builder.')}</p>`)); return }

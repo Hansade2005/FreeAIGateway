@@ -622,13 +622,15 @@ export function Builder({ onEditProvider, onHome }: { onEditProvider?: () => voi
     // isn't popup-blocked (a window.open after the long async build would be).
     // It loads /deploy.html (real file → works on static hosts like Puter), then
     // we hand it the build id once ready.
-    const tab = window.open('/deploy.html', '_blank')
+    const tab = window.open('/deploy.html?building=true', '_blank')
     try {
       setStatus('installing')
       const { files: dist } = await ws.current!.build(fw.buildDirs.length ? fw.buildDirs : undefined)
       const id = await saveDeploy(project.name, dist, project.id)
       setStatus('ready')
-      if (tab) tab.location.href = `/deploy.html?id=${id}`
+      // The user may have closed the tab mid-build; touching a closed tab's
+      // location can throw, so re-open instead.
+      if (tab && !tab.closed) tab.location.href = `/deploy.html?id=${id}`
       else window.open(`/deploy.html?id=${id}`, '_blank')
     } catch (e: any) {
       setStatus('ready')
